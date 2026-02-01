@@ -70,6 +70,11 @@ export function useSocket() {
 
   useEffect(() => {
     const serverUrl = import.meta.env.VITE_SERVER_URL || 'http://localhost:3001'
+    console.log('Environment check:', {
+      VITE_SERVER_URL: import.meta.env.VITE_SERVER_URL,
+      allEnv: import.meta.env,
+      serverUrl
+    })
     console.log('Attempting to connect to:', serverUrl)
     
     const newSocket = io(serverUrl, {
