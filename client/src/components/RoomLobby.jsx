@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 
-export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHostId = null, roomCode: initialRoomCode, setRoomCode: setRoomCodeProp, setPlayerName: setPlayerNameProp, clearSavedState, setGameState: setGameStateProp }) {
+export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHostId = null, roomCode: initialRoomCode, setRoomCode: setRoomCodeProp, setPlayerName: setPlayerNameProp, clearSavedState, setGameState: setGameStateProp, roomClosedError }) {
   const [roomCode, setRoomCode] = useState(initialRoomCode || '')
   const [joinCode, setJoinCode] = useState('')
   const [players, setPlayers] = useState([])
@@ -144,7 +144,12 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
             setGameStateProp(response.gameState)
           }
         } else {
-          // If rejoin fails, try regular join
+          // If rejoin fails, check if room not found
+          if (response?.error === 'Room not found' || response?.error?.includes('not found')) {
+            if (clearSavedState) clearSavedState()
+            return
+          }
+          // Otherwise try regular join
           socket.emit('joinRoom', { 
             roomCode: code,
             playerName: playerName.trim()
@@ -161,6 +166,9 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
                 setGameStateProp(joinResponse.gameState)
               }
             } else {
+              if (joinResponse?.error === 'Room not found' || joinResponse?.error?.includes('not found')) {
+                if (clearSavedState) clearSavedState()
+              }
               alert(joinResponse.error || 'Failed to join room')
             }
           })
@@ -184,6 +192,9 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
             setGameStateProp(response.gameState)
           }
         } else {
+          if (response?.error === 'Room not found' || response?.error?.includes('not found')) {
+            if (clearSavedState) clearSavedState()
+          }
           alert(response.error || 'Failed to join room')
         }
       })
@@ -224,6 +235,17 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
     : gameState?.players?.[0]?.id)
 
   const isHostEffective = socket?.id && effectiveHostId ? socket.id === effectiveHostId : isHost
+
+  // If room closed error, clear room and show home with error
+  useEffect(() => {
+    if (roomClosedError && roomCode) {
+      if (clearSavedState) clearSavedState()
+      setRoomCode('')
+      setPlayers([])
+      setIsHost(false)
+      setShowNameInput(true)
+    }
+  }, [roomClosedError, roomCode, clearSavedState])
 
   if (roomCode) {
     return (
@@ -320,6 +342,24 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
       <div style={styles.card}>
         <h1 style={styles.title}>Ringo</h1>
         <p style={styles.subtitle}>Strategy Card Game</p>
+
+        {roomClosedError && (
+          <div style={styles.errorBanner}>
+            <div style={styles.errorText}>{roomClosedError}</div>
+            <button 
+              onClick={() => {
+                if (clearSavedState) clearSavedState()
+                setRoomCode('')
+                setPlayers([])
+                setIsHost(false)
+                setShowNameInput(true)
+              }}
+              style={styles.errorButton}
+            >
+              OK
+            </button>
+          </div>
+        )}
 
         {showNameInput && (
           <div style={styles.nameInputSection}>
@@ -568,6 +608,8 @@ const styles = {
     borderRadius: '12px',
     border: '1px solid #eee',
     transition: 'transform 0.2s',
+    flexWrap: 'wrap',
+    gap: '8px',
     ':hover': {
       transform: 'translateY(-2px)'
     }
@@ -578,7 +620,10 @@ const styles = {
     fontWeight: '600',
     display: 'flex',
     alignItems: 'center',
-    gap: '8px'
+    gap: '8px',
+    flex: '1 1 auto',
+    minWidth: '0',
+    wordBreak: 'break-word'
   },
   playerWins: {
     fontSize: '14px',
@@ -586,7 +631,9 @@ const styles = {
     fontWeight: '700',
     background: 'rgba(102, 126, 234, 0.1)',
     padding: '4px 12px',
-    borderRadius: '20px'
+    borderRadius: '20px',
+    whiteSpace: 'nowrap',
+    flexShrink: 0
   },
   startButton: {
     width: '100%',
@@ -623,6 +670,34 @@ const styles = {
   gameOverText: {
     fontSize: '18px',
     fontWeight: '700'
+  },
+  errorBanner: {
+    background: 'linear-gradient(135deg, #FF6B6B 0%, #EE5A6F 100%)',
+    borderRadius: '12px',
+    padding: '20px',
+    textAlign: 'center',
+    color: 'white',
+    marginBottom: '24px',
+    boxShadow: '0 4px 12px rgba(238, 90, 111, 0.3)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '16px',
+    alignItems: 'center'
+  },
+  errorText: {
+    fontSize: '18px',
+    fontWeight: '700'
+  },
+  errorButton: {
+    background: 'rgba(255, 255, 255, 0.2)',
+    color: 'white',
+    border: '2px solid rgba(255, 255, 255, 0.5)',
+    padding: '10px 24px',
+    borderRadius: '8px',
+    fontSize: '16px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'all 0.2s'
   },
   waitingText: {
     textAlign: 'center',

@@ -4,17 +4,14 @@ import RoomLobby from './components/RoomLobby'
 import GameBoard from './components/GameBoard'
 
 function App() {
-  const { socket, connected, gameState, roomPlayers, roomCode, roomHostId, setRoomCode, setPlayerName, clearSavedState, setGameState } = useSocket()
+  const { socket, connected, gameState, roomPlayers, roomCode, roomHostId, setRoomCode, setPlayerName, clearSavedState, setGameState, roomClosedError } = useSocket()
   const [connectionTimeout, setConnectionTimeout] = useState(false)
   const [showGame, setShowGame] = useState(false)
 
   useEffect(() => {
-    // Show game only while playing
-    if (gameState?.status === 'PLAYING') {
+    // Show game while playing or if game just ended
+    if (gameState?.status === 'PLAYING' || gameState?.status === 'GAME_OVER') {
       setShowGame(true)
-    }
-    if (gameState?.status === 'GAME_OVER') {
-      setShowGame(false)
     }
   }, [gameState])
 
@@ -71,11 +68,11 @@ function App() {
     )
   }
 
-  if (showGame && gameState?.status === 'PLAYING') {
+  if (showGame && (gameState?.status === 'PLAYING' || gameState?.status === 'GAME_OVER')) {
     return <GameBoard socket={socket} gameState={gameState} roomCode={roomCode} roomPlayers={roomPlayers} onGoHome={handleGoHome} />
   }
 
-  return <RoomLobby socket={socket} gameState={gameState} roomCode={roomCode} roomPlayers={roomPlayers} roomHostId={roomHostId} setRoomCode={setRoomCode} setPlayerName={setPlayerName} clearSavedState={clearSavedState} setGameState={setGameState} />
+  return <RoomLobby socket={socket} gameState={gameState} roomCode={roomCode} roomPlayers={roomPlayers} roomHostId={roomHostId} setRoomCode={setRoomCode} setPlayerName={setPlayerName} clearSavedState={clearSavedState} setGameState={setGameState} roomClosedError={roomClosedError} />
 }
 
 export default App

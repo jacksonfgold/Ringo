@@ -433,6 +433,8 @@ export function handleInsertCardWithTracking(state, playerId, insertPosition) {
     p.id === playerId ? { ...p, hand: newHand } : p
   )
 
+  const insertedCard = state.drawnCard
+
   let newState = {
     ...state,
     players: updatedPlayers,
@@ -444,7 +446,7 @@ export function handleInsertCardWithTracking(state, playerId, insertPosition) {
   newState = checkPileClosing(newState)
   newState = checkWinCondition(newState)
 
-  return { success: true, state: newState }
+  return { success: true, state: newState, insertedCard }
 }
 
 export function handleDiscardDrawnCardWithTracking(state, playerId) {
@@ -452,7 +454,8 @@ export function handleDiscardDrawnCardWithTracking(state, playerId) {
     return { success: false, error: 'No drawn card available', state }
   }
 
-  const newDiscardPile = [...state.discardPile, state.drawnCard]
+  const discardedCard = state.drawnCard
+  const newDiscardPile = [...state.discardPile, discardedCard]
 
   let newState = {
     ...state,
@@ -464,5 +467,5 @@ export function handleDiscardDrawnCardWithTracking(state, playerId) {
   newState = advanceTurn(newState)
   newState = checkPileClosing(newState)
 
-  return { success: true, state: newState }
+  return { success: true, state: newState, discardedCard }
 }

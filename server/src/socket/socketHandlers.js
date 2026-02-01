@@ -293,6 +293,17 @@ export function setupSocketHandlers(io) {
 
       room.gameState = result.state
 
+      const player = room.players.find(p => p.id === socket.id)
+      const playerName = player?.name || 'Player'
+
+      // Emit notification to all other players (without card details)
+      io.to(room.code).except(socket.id).emit('playerNotification', {
+        type: 'draw',
+        message: 'drew a card',
+        playerName,
+        cardInfo: []
+      })
+
       // Send drawn card only to the player who drew it
       io.to(socket.id).emit('cardDrawn', {
         card: result.drawnCard,
@@ -377,6 +388,19 @@ export function setupSocketHandlers(io) {
 
       room.gameState = result.state
 
+      const player = room.players.find(p => p.id === socket.id)
+      const playerName = player?.name || 'Player'
+
+      // Emit notification for card insertion (without card details - it's from draw)
+      if (result.insertedCard) {
+        io.to(room.code).except(socket.id).emit('playerNotification', {
+          type: 'info',
+          message: 'added a card to their hand',
+          playerName,
+          cardInfo: []
+        })
+      }
+
       // If game ended, update win counts and send roomUpdate
       if (room.gameState.status === GameStatus.GAME_OVER && room.gameState.winner) {
         const winner = room.players.find(p => p.id === room.gameState.winner)
@@ -418,6 +442,17 @@ export function setupSocketHandlers(io) {
 
       room.gameState = result.state
 
+      const player = room.players.find(p => p.id === socket.id)
+      const playerName = player?.name || 'Player'
+
+      // Emit notification for card discard (without card details)
+      io.to(room.code).except(socket.id).emit('playerNotification', {
+        type: 'info',
+        message: 'discarded a card',
+        playerName,
+        cardInfo: []
+      })
+
       // If game ended, update win counts and send roomUpdate
       if (room.gameState.status === GameStatus.GAME_OVER && room.gameState.winner) {
         const winner = room.players.find(p => p.id === room.gameState.winner)
@@ -451,6 +486,12 @@ export function setupSocketHandlers(io) {
         return callback({ error: 'Room or game not found' })
       }
 
+      // Get captured card info BEFORE processing (since it will be removed from state)
+      const allCapturedCardsBefore = room.gameState.pendingCapture?.cards || []
+      const capturedCardBefore = data.action === 'insert_one' && data.cardId
+        ? allCapturedCardsBefore.find(c => c.id === data.cardId)
+        : null
+
       const result = handleCaptureDecision(
         room.gameState,
         socket.id,
@@ -464,6 +505,34 @@ export function setupSocketHandlers(io) {
       }
 
       room.gameState = result.state
+
+      const player = room.players.find(p => p.id === socket.id)
+      const playerName = player?.name || 'Player'
+
+      // Emit notification for capture decision
+      if (data.action === 'discard_all') {
+        // Don't show card details for discard
+        io.to(room.code).except(socket.id).emit('playerNotification', {
+          type: 'info',
+          message: 'discarded captured cards',
+          playerName,
+          cardInfo: []
+        })
+      } else if (data.action === 'insert_one' && capturedCardBefore) {
+        // Show the captured card that was picked up
+        const cardInfo = [{
+          value: capturedCardBefore.resolvedValue || capturedCardBefore.value,
+          isSplit: capturedCardBefore.isSplit,
+          splitValues: capturedCardBefore.splitValues
+        }]
+
+        io.to(room.code).except(socket.id).emit('playerNotification', {
+          type: 'info',
+          message: 'picked up a captured card',
+          playerName,
+          cardInfo
+        })
+      }
 
       // If game ended, update win counts and send roomUpdate
       if (room.gameState.status === GameStatus.GAME_OVER && room.gameState.winner) {

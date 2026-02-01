@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo } from 'react'
 import { DndContext, useDraggable, useDroppable, DragOverlay, useSensor, useSensors, MouseSensor, TouchSensor } from '@dnd-kit/core'
 import { CSS } from '@dnd-kit/utilities'
+import confetti from 'canvas-confetti'
+import { NotificationSystem } from './NotificationSystem'
 
 // --- Draggable/Droppable Components ---
 
@@ -277,11 +279,88 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
     }
   }, [socket])
 
+  // Calculate which cards can be part of a valid RINGO combo
+  const getValidRingoCards = useMemo(() => {
+    if (!ringoMode || !drawnCard || !currentPlayer?.hand) {
+      return new Set()
+    }
+
+    const validIndices = new Set()
+    const hand = currentPlayer.hand
+    const currentCombo = gameState?.currentCombo
+
+    // Try inserting drawn card at each position
+    for (let insertPos = 0; insertPos <= hand.length; insertPos++) {
+      const testHand = [...hand]
+      testHand.splice(insertPos, 0, drawnCard)
+
+      // Check all possible adjacent combos that include the drawn card
+      for (let start = Math.max(0, insertPos - 4); start <= insertPos; start++) {
+        for (let length = 1; length <= 5; length++) {
+          const end = start + length
+          if (end > testHand.length) break
+          if (end <= insertPos || start > insertPos) continue // Must include drawn card
+
+          const cardIndices = []
+          for (let i = start; i < end; i++) {
+            cardIndices.push(i)
+          }
+
+          // Check if this forms a valid combo (same value)
+          const cards = cardIndices.map(idx => testHand[idx])
+          const firstCard = cards[0]
+          const firstValue = firstCard.isSplit ? firstCard.splitValues[0] : firstCard.value
+          
+          // Check if all cards can resolve to the same value
+          const allSameValue = cards.every(card => {
+            if (!card.isSplit) return card.value === firstValue
+            return card.splitValues.includes(firstValue)
+          })
+
+          if (allSameValue) {
+            // Check if it beats current combo
+            const comboSize = cards.length
+            const comboValue = firstValue
+            
+            let canBeat = true
+            if (currentCombo && currentCombo.length > 0) {
+              const currentSize = currentCombo.length
+              const currentValue = currentCombo[0].resolvedValue || 
+                (currentCombo[0].isSplit ? Math.max(...currentCombo[0].splitValues) : currentCombo[0].value)
+              
+              // Must be same size and higher value
+              canBeat = comboSize === currentSize && comboValue > currentValue
+            }
+
+            if (canBeat) {
+              // Add all hand card indices (not the drawn card)
+              cardIndices.forEach(idx => {
+                if (idx < insertPos) {
+                  validIndices.add(idx)
+                } else if (idx > insertPos) {
+                  validIndices.add(idx - 1) // Adjust for inserted card
+                }
+              })
+            }
+          }
+        }
+      }
+    }
+
+    return validIndices
+  }, [ringoMode, drawnCard, currentPlayer?.hand, gameState?.currentCombo])
+
   const handleCardClick = (index) => {
     if (!isMyTurn) return
 
     // Special handling for RINGO mode
     if (ringoMode) {
+      // Check if this card can be part of a valid RINGO combo
+      if (!getValidRingoCards.has(index) && selectedCards.length === 0) {
+        triggerInvalidSelection(index)
+        return
+      }
+
       if (selectedCards.includes(index)) {
         // Deselecting: only if it's an end of the selection
         const sorted = [...selectedCards].sort((a, b) => a - b)
@@ -290,13 +369,17 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
         } else if (index === sorted[sorted.length - 1]) {
           setSelectedCards(sorted.slice(0, -1))
         } else {
-          // Deselecting from middle: clear selection
+// Deselecting from middle: clear selection
           setSelectedCards([])
         }
       } else {
         // Selecting: must be adjacent to current selection
         if (selectedCards.length === 0) {
-          setSelectedCards([index])
+          if (getValidRingoCards.has(index)) {
+            setSelectedCards([index])
+          } else {
+            triggerInvalidSelection(index)
+          }
         } else {
           const sorted = [...selectedCards].sort((a, b) => a - b)
           if (index === sorted[0] - 1) {
@@ -304,7 +387,7 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
             const card = currentPlayer.hand[index]
             const cardValues = card.isSplit ? new Set(card.splitValues) : new Set([card.value])
             const canAdd = [...possibleValues].some(v => cardValues.has(v)) || possibleValues.size === 0
-            if (!canAdd) {
+            if (!canAdd || !getValidRingoCards.has(index)) {
               triggerInvalidSelection(index)
               return
             }
@@ -314,14 +397,18 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
             const card = currentPlayer.hand[index]
             const cardValues = card.isSplit ? new Set(card.splitValues) : new Set([card.value])
             const canAdd = [...possibleValues].some(v => cardValues.has(v)) || possibleValues.size === 0
-            if (!canAdd) {
+            if (!canAdd || !getValidRingoCards.has(index)) {
               triggerInvalidSelection(index)
               return
             }
             setSelectedCards([...sorted, index])
           } else {
-            // Not adjacent: start new selection
-            setSelectedCards([index])
+            // Not adjacent: start new selection if valid
+            if (getValidRingoCards.has(index)) {
+              setSelectedCards([index])
+            } else {
+              triggerInvalidSelection(index)
+            }
           }
         }
       }
@@ -494,16 +581,74 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
     setPendingPlay(null)
   }
 
+  // Trigger confetti when game ends
+  useEffect(() => {
+    if (gameState?.status === 'GAME_OVER') {
+      try {
+        const duration = 3000
+        const end = Date.now() + duration
+
+        const frame = () => {
+          try {
+            confetti({
+              particleCount: 2,
+              angle: 60,
+              spread: 55,
+              origin: { x: 0 },
+              colors: ['#667eea', '#764ba2', '#FFD700', '#FF6B6B']
+            })
+            confetti({
+              particleCount: 2,
+              angle: 120,
+              spread: 55,
+              origin: { x: 1 },
+              colors: ['#667eea', '#764ba2', '#FFD700', '#FF6B6B']
+            })
+          } catch (e) {
+            console.error('Confetti error:', e)
+          }
+
+          if (Date.now() < end) {
+            requestAnimationFrame(frame)
+          }
+        }
+        frame()
+      } catch (e) {
+        console.error('Confetti setup error:', e)
+      }
+    }
+  }, [gameState?.status])
+
   if (gameState?.status === 'GAME_OVER') {
-    const winner = gameState.players.find(p => p.id === gameState.winner)
+    const winner = gameState.players?.find(p => p.id === gameState.winner)
     const isWinner = gameState.winner === socket.id
+    
     return (
       <div style={styles.gameOverContainer}>
         <div style={styles.gameOverCard}>
-          <h1 style={styles.gameOverTitle}>{isWinner ? '🎉 You Win! 🎉' : `${winner?.name} Wins!`}</h1>
+          <h1 style={styles.gameOverTitle}>{isWinner ? '🎉 You Win! 🎉' : `${winner?.name || 'Player'} Wins!`}</h1>
           <p style={styles.gameOverSubtitle}>
-            {isWinner ? 'Congratulations!' : 'Better luck next time!'}
+            {isWinner ? 'Congratulations! You emptied your hand!' : 'Better luck next time!'}
           </p>
+          
+          {gameState.currentCombo && gameState.currentCombo.length > 0 && (
+            <div style={styles.winningPlaySection}>
+              <div style={styles.winningPlayLabel}>Winning Play</div>
+              <div style={styles.winningComboCards}>
+                {gameState.currentCombo.map((card, idx) => {
+                  const cardColor = card.isSplit 
+                    ? `linear-gradient(to right, ${getCardColor(card.splitValues[0])} 0%, ${getCardColor(card.splitValues[0])} 50%, ${getCardColor(card.splitValues[1])} 50%, ${getCardColor(card.splitValues[1])} 100%)`
+                    : getCardColor(card.value)
+                  return (
+                    <div key={idx} style={{ ...styles.winningComboCard, background: cardColor }}>
+                      {card.isSplit ? `${card.splitValues[0]}/${card.splitValues[1]}` : card.value}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
           <button
             onClick={onGoHome}
             style={styles.gameOverButton}
@@ -527,6 +672,7 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
 
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+      <NotificationSystem socket={socket} />
       <div style={styles.container} onClick={(e) => {
         // Only trigger if clicking the background directly
         if (e.target === e.currentTarget) {
@@ -700,7 +846,12 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
               
               {ringoMode && (
                 <div style={styles.ringoHint}>
-                  Select adjacent cards from your hand to combine with the drawn card, or just confirm to play it alone.
+                  <div style={{ marginBottom: '8px', fontWeight: '700' }}>
+                    💡 Cards highlighted in gold can be combined with the drawn card!
+                  </div>
+                  <div style={{ fontSize: '14px', opacity: 0.9 }}>
+                    Select adjacent highlighted cards to form a combo, or confirm to play the drawn card alone.
+                  </div>
                 </div>
               )}
             </div>
@@ -825,6 +976,7 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
                   const isSelected = selectedCards.includes(index)
                   const isAdjacent = selectedCards.length > 0 && 
                     (selectedCards.includes(index - 1) || selectedCards.includes(index + 1))
+                  const isValidRingo = ringoMode && getValidRingoCards.has(index)
                   
                   const cardColor = card.isSplit 
                     ? `linear-gradient(to right, ${getCardColor(card.splitValues[0])} 0%, ${getCardColor(card.splitValues[0])} 50%, ${getCardColor(card.splitValues[1])} 50%, ${getCardColor(card.splitValues[1])} 100%)`
@@ -840,7 +992,8 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
                         cursor: insertingCard || insertingCapture !== null ? 'default' : 'pointer',
                         ...(isSelected ? styles.selectedCard : {}),
                         ...(isAdjacent && !isSelected ? styles.adjacentCard : {}),
-                        ...(ringoMode && !isSelected && !isAdjacent ? styles.ringoDimmedCard : {}),
+                        ...(ringoMode && !isSelected && !isAdjacent && !isValidRingo ? styles.ringoDimmedCard : {}),
+                        ...(ringoMode && isValidRingo && !isSelected ? styles.validRingoCard : {}),
                         ...(invalidSelectionIndex === index ? styles.invalidCard : {})
                       }}
                     >
@@ -1224,6 +1377,13 @@ const styles = {
     opacity: 0.5,
     transform: 'scale(0.95)',
     filter: 'grayscale(0.5)'
+  },
+  validRingoCard: {
+    border: '3px solid #FFD700',
+    boxShadow: '0 0 15px rgba(255, 215, 0, 0.6), inset 0 0 10px rgba(255, 215, 0, 0.3)',
+    transform: 'scale(1.05)',
+    animation: 'pulse 1.5s infinite',
+    zIndex: 10
   },
   card: {
     width: '56px',
@@ -1675,5 +1835,39 @@ const styles = {
     ':hover': {
       transform: 'translateY(-2px)'
     }
+  },
+  winningPlaySection: {
+    marginBottom: '32px',
+    padding: '20px',
+    background: 'rgba(255,255,255,0.5)',
+    borderRadius: '16px',
+    border: '1px solid rgba(255,255,255,0.5)'
+  },
+  winningPlayLabel: {
+    fontSize: '14px',
+    color: '#666',
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: '1px',
+    marginBottom: '12px'
+  },
+  winningComboCards: {
+    display: 'flex',
+    gap: '8px',
+    justifyContent: 'center',
+    flexWrap: 'wrap'
+  },
+  winningComboCard: {
+    width: '48px',
+    height: '72px',
+    borderRadius: '8px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '20px',
+    fontWeight: '800',
+    color: 'white',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+    border: '2px solid white'
   }
 }

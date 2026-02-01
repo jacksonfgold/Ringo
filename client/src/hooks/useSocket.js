@@ -9,6 +9,7 @@ export function useSocket() {
   const [roomCode, setRoomCode] = useState(null)
   const [playerName, setPlayerName] = useState(null)
   const [roomHostId, setRoomHostId] = useState(null)
+  const [roomClosedError, setRoomClosedError] = useState(null)
   const socketRef = useRef(null)
   const hasAttemptedRejoin = useRef(false)
   const hasLoadedFromStorage = useRef(false)
@@ -194,13 +195,18 @@ export function useSocket() {
       if (response?.success) {
         setRoomCode(savedRoomCode)
         setPlayerName(savedPlayerName)
+        setRoomClosedError(null)
         if (response.gameState) {
           console.log('[useSocket] Setting game state from rejoin, players:', response.gameState.players?.map(p => ({ id: p.id, name: p.name })))
           setGameState(response.gameState)
         }
       } else {
         console.warn('[useSocket] Auto-rejoin failed:', response?.error)
-        // Don't clear saved state - user might want to try manually
+        // If room not found, clear state and show error
+        if (response?.error === 'Room not found' || response?.error?.includes('not found')) {
+          clearSavedState()
+          setRoomClosedError('Room has been closed')
+        }
       }
     })
   }, [connected, socket])
@@ -212,6 +218,7 @@ export function useSocket() {
     setRoomCode(null)
     setPlayerName(null)
     setGameState(null)
+    setRoomClosedError(null)
   }
 
   return {
@@ -222,6 +229,7 @@ export function useSocket() {
     roomCode,
     roomHostId,
     playerName,
+    roomClosedError,
     setRoomCode,
     setPlayerName,
     setGameState,
