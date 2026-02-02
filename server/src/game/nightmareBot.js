@@ -494,22 +494,108 @@ export function nightmareModeDecision(gameState, botId, roomCode) {
     candidates.push({ type: 'draw' })
   }
   
+  // If no valid plays, must draw
+  const playCandidates = candidates.filter(c => c.type === 'play')
+  if (playCandidates.length === 0) {
+    return { action: 'draw' }
+  }
+  
   // Evaluate each candidate with MCTS
-  let bestAction = candidates[0] || { action: 'draw' }
+  let bestAction = playCandidates[0] // Default to first play option
   let bestUtility = -Infinity
   
+  // Add heuristic bonus for playing vs drawing
   for (const candidate of candidates) {
-    const simResult = simulateForward(gameState, botId, candidate, roomCode, 6)
+    let simResult
+    if (candidate.type === 'draw') {
+      // For draws, use a quick heuristic instead of full simulation
+      simResult = {
+        winProbability: 0.1, // Drawing is generally worse
+        avgTurnsToWin: 10,
+        loseSoonProbability: 0.2,
+        giveFinisherProbability: 0.1
+      }
+    } else {
+      simResult = simulateForward(gameState, botId, candidate, roomCode, 6)
+    }
+    
+    // Heuristic bonus: playing is generally better than drawing
+    let playBonus = 0
+    if (candidate.type === 'play') {
+      playBonus = 20 // Strong preference to play when possible
+      // Bonus for larger plays
+      playBonus += candidate.comboSize * 5
+      // Bonus for beating efficiently
+      if (currentCombo && candidate.comboSize <= currentCombo.length) {
+        playBonus += 10 // Same size beat is efficient
+      }
+    }
     
     const utility = 
       100 * simResult.winProbability -
       6 * simResult.avgTurnsToWin -
       120 * simResult.loseSoonProbability -
-      80 * simResult.giveFinisherProbability
+      80 * simResult.giveFinisherProbability +
+      playBonus
     
     if (utility > bestUtility) {
       bestUtility = utility
       bestAction = candidate
+    }
+  }
+  
+  // Strong preference: if we can play, prefer playing unless draw is clearly better
+  if (bestAction.type === 'draw' && playCandidates.length > 0) {
+    // Only draw if utility is significantly better (by at least 30 points)
+    const bestPlayUtility = bestUtility
+    const drawUtility = bestUtility
+    
+    // Recalculate draw utility properly
+    const drawSim = {
+      winProbability: 0.05,
+      avgTurnsToWin: 12,
+      loseSoonProbability: 0.3,
+      giveFinisherProbability: 0.15
+    }
+    const drawUtil = 
+      100 * drawSim.winProbability -
+      6 * drawSim.avgTurnsToWin -
+      120 * drawSim.loseSoonProbability -
+      80 * drawSim.giveFinisherProbability
+    
+    // Find best play utility
+    let bestPlayUtil = -Infinity
+    for (const play of playCandidates) {
+      const sim = simulateForward(gameState, botId, play, roomCode, 6)
+      const util = 
+        100 * sim.winProbability -
+        6 * sim.avgTurnsToWin -
+        120 * sim.loseSoonProbability -
+        80 * sim.giveFinisherProbability +
+        20 + play.comboSize * 5
+      if (util > bestPlayUtil) bestPlayUtil = util
+    }
+    
+    // Only draw if it's significantly better
+    if (drawUtil > bestPlayUtil + 30) {
+      return { action: 'draw' }
+    } else {
+      // Prefer playing
+      bestAction = playCandidates[0]
+      // Find the actual best play
+      for (const play of playCandidates) {
+        const sim = simulateForward(gameState, botId, play, roomCode, 6)
+        const util = 
+          100 * sim.winProbability -
+          6 * sim.avgTurnsToWin -
+          120 * sim.loseSoonProbability -
+          80 * sim.giveFinisherProbability +
+          20 + play.comboSize * 5
+        if (util > bestUtility) {
+          bestUtility = util
+          bestAction = play
+        }
+      }
     }
   }
   
