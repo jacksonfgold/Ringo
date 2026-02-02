@@ -279,6 +279,11 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
     }
   }, [socket])
 
+  const getCardPossibleValues = (card) => {
+    if (!card) return []
+    return card.isSplit ? card.splitValues : [card.value]
+  }
+
   // Calculate which cards can be part of a valid RINGO combo
   const getValidRingoCards = useMemo(() => {
     if (!ringoMode || !drawnCard || !currentPlayer?.hand) {
@@ -306,42 +311,46 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
             cardIndices.push(i)
           }
 
-          // Check if this forms a valid combo (same value)
           const cards = cardIndices.map(idx => testHand[idx])
-          const firstCard = cards[0]
-          const firstValue = firstCard.isSplit ? firstCard.splitValues[0] : firstCard.value
-          
-          // Check if all cards can resolve to the same value
-          const allSameValue = cards.every(card => {
-            if (!card.isSplit) return card.value === firstValue
-            return card.splitValues.includes(firstValue)
-          })
+          if (cards.length === 0) continue
 
-          if (allSameValue) {
-            // Check if it beats current combo
-            const comboSize = cards.length
-            const comboValue = firstValue
-            
-            let canBeat = true
-            if (currentCombo && currentCombo.length > 0) {
-              const currentSize = currentCombo.length
-              const currentValue = currentCombo[0].resolvedValue || 
-                (currentCombo[0].isSplit ? Math.max(...currentCombo[0].splitValues) : currentCombo[0].value)
-              
-              // Must be same size and higher value
-              canBeat = comboSize === currentSize && comboValue > currentValue
-            }
+          // Find possible values intersection across the combo (split-aware)
+          let possibleValues = new Set(getCardPossibleValues(cards[0]))
+          for (let i = 1; i < cards.length; i++) {
+            const values = new Set(getCardPossibleValues(cards[i]))
+            possibleValues = new Set([...possibleValues].filter(v => values.has(v)))
+            if (possibleValues.size === 0) break
+          }
 
-            if (canBeat) {
-              // Add all hand card indices (not the drawn card)
-              cardIndices.forEach(idx => {
-                if (idx < insertPos) {
-                  validIndices.add(idx)
-                } else if (idx > insertPos) {
-                  validIndices.add(idx - 1) // Adjust for inserted card
-                }
-              })
+          if (possibleValues.size === 0) continue
+
+          // Check if it beats current combo (same rules as server)
+          const comboSize = cards.length
+          let canBeat = true
+          if (currentCombo && currentCombo.length > 0) {
+            const currentSize = currentCombo.length
+            const currentValue = currentCombo[0].resolvedValue || 
+              (currentCombo[0].isSplit ? Math.max(...currentCombo[0].splitValues) : currentCombo[0].value)
+
+            if (comboSize > currentSize) {
+              canBeat = true
+            } else if (comboSize === currentSize) {
+              const hasHigherValue = [...possibleValues].some(v => v > currentValue)
+              canBeat = hasHigherValue
+            } else {
+              canBeat = false
             }
+          }
+
+          if (canBeat) {
+            // Add all hand card indices (not the drawn card)
+            cardIndices.forEach(idx => {
+              if (idx < insertPos) {
+                validIndices.add(idx)
+              } else if (idx > insertPos) {
+                validIndices.add(idx - 1) // Adjust for inserted card
+              }
+            })
           }
         }
       }
@@ -673,7 +682,12 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <NotificationSystem socket={socket} />
-      <div style={styles.container} onClick={(e) => {
+      <div 
+        style={{
+          ...styles.container,
+          ...(isMyTurn ? styles.activeContainer : {})
+        }} 
+        onClick={(e) => {
         // Only trigger if clicking the background directly
         if (e.target === e.currentTarget) {
           handleBackgroundClick(e)
@@ -686,6 +700,11 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
           ← Home
         </button>
         <div style={styles.gameArea}>
+          {isMyTurn && (
+            <div style={styles.turnIndicator}>
+              <div style={styles.turnIndicatorText}>YOUR TURN</div>
+            </div>
+          )}
           {/* Players */}
           <div style={styles.otherPlayers}>
             {(gameState?.players?.length ? gameState.players : roomPlayers).map((player, index) => {
@@ -1188,7 +1207,11 @@ const styles = {
     flexDirection: 'column',
     position: 'relative',
     overflowY: 'auto',
-    WebkitOverflowScrolling: 'touch' // Smooth scrolling on iOS
+    WebkitOverflowScrolling: 'touch', // Smooth scrolling on iOS
+    transition: 'background 0.5s ease',
+  },
+  activeContainer: {
+    background: 'linear-gradient(135deg, #5b86e5 0%, #36d1dc 100%)', // Brighter, distinct color for active turn
   },
   homeButton: {
     position: 'absolute',
@@ -1245,7 +1268,27 @@ const styles = {
     border: '3px solid #667eea',
     boxShadow: '0 0 0 4px rgba(102, 126, 234, 0.2)',
     transform: 'scale(1.05)',
-    zIndex: 2
+    zIndex: 2,
+    background: 'rgba(255, 255, 255, 0.95)'
+  },
+  turnIndicator: {
+    position: 'absolute',
+    top: '20px',
+    left: '50%',
+    transform: 'translateX(-50%)',
+    zIndex: 90,
+    animation: 'pulse 2s infinite'
+  },
+  turnIndicatorText: {
+    background: 'linear-gradient(135deg, #2ecc71 0%, #27ae60 100%)',
+    color: 'white',
+    padding: '8px 24px',
+    borderRadius: '20px',
+    fontWeight: '900',
+    fontSize: '16px',
+    letterSpacing: '2px',
+    boxShadow: '0 4px 12px rgba(46, 204, 113, 0.4)',
+    textTransform: 'uppercase'
   },
   playerName: {
     fontSize: '14px',
@@ -1787,25 +1830,32 @@ const styles = {
     fontWeight: '700'
   },
   gameOverContainer: {
-    minHeight: '100vh',
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 2000,
     display: 'flex',
     justifyContent: 'center',
     alignItems: 'center',
     padding: '20px',
-    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    overflowY: 'auto'
   },
   gameOverCard: {
     background: 'rgba(255, 255, 255, 0.95)',
     borderRadius: '32px',
-    padding: '48px',
+    padding: '32px 24px',
     textAlign: 'center',
     boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
     maxWidth: '450px',
     width: '100%',
-    backdropFilter: 'blur(10px)'
+    backdropFilter: 'blur(10px)',
+    margin: 'auto 0'
   },
   gameOverTitle: {
-    fontSize: '48px',
+    fontSize: '36px',
     fontWeight: '900',
     marginBottom: '16px',
     background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',

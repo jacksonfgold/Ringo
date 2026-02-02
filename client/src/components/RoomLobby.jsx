@@ -12,6 +12,7 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
     return saved || ''
   })
   const [showNameInput, setShowNameInput] = useState(true)
+  const [showRules, setShowRules] = useState(false)
 
   const [copyFeedback, setCopyFeedback] = useState(false)
 
@@ -343,6 +344,13 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
         <h1 style={styles.title}>Ringo</h1>
         <p style={styles.subtitle}>Strategy Card Game</p>
 
+        <button 
+          onClick={() => setShowRules(true)}
+          style={styles.rulesButton}
+        >
+          How to Play
+        </button>
+
         {roomClosedError && (
           <div style={styles.errorBanner}>
             <div style={styles.errorText}>{roomClosedError}</div>
@@ -410,6 +418,71 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
           </div>
         </div>
       </div>
+
+      {showRules && (
+        <div style={styles.modalOverlay} onClick={(e) => {
+          if (e.target === e.currentTarget) setShowRules(false)
+        }}>
+          <div style={styles.modalContent}>
+            <div style={styles.modalHeader}>
+              <h2 style={styles.modalTitle}>How to Play Ringo</h2>
+              <button 
+                onClick={() => setShowRules(false)}
+                style={styles.closeButton}
+              >
+                ✕
+              </button>
+            </div>
+            <div style={styles.modalBody}>
+              <div style={styles.ruleSection}>
+                <h3 style={styles.ruleTitle}>Objective</h3>
+                <p style={styles.ruleText}>Be the first player to empty your hand!</p>
+              </div>
+
+              <div style={styles.ruleSection}>
+                <h3 style={styles.ruleTitle}>On Your Turn</h3>
+                <p style={styles.ruleText}>Choose one action:</p>
+                <ul style={styles.ruleList}>
+                  <li>
+                    <strong>Play:</strong> Play adjacent cards of the same value from your hand. You must beat the current combo on the table by playing the same or greater number of cards with a higher value (e.g., two 1s beats one 8).
+                  </li>
+                  <li>
+                    <strong>Draw:</strong> Draw 1 card from the pile.
+                  </li>
+                </ul>
+              </div>
+
+              <div style={styles.ruleSection}>
+                <h3 style={styles.ruleTitle}>Drawing & RINGO!</h3>
+                <p style={styles.ruleText}>When you draw a card:</p>
+                <ul style={styles.ruleList}>
+                  <li>
+                    If you can combine the drawn card with cards in your hand to beat the current table combo, you can call <strong>RINGO!</strong> and play immediately.
+                  </li>
+                  <li>
+                    Otherwise, you must add the card to your hand (insert it anywhere) or discard it.
+                  </li>
+                </ul>
+              </div>
+
+              <div style={styles.ruleSection}>
+                <h3 style={styles.ruleTitle}>Special Rules</h3>
+                <ul style={styles.ruleList}>
+                  <li>
+                    <strong>Split Cards:</strong> Cards like 5/6 can count as either value.
+                  </li>
+                  <li>
+                    <strong>Closing a Pile:</strong> If play returns to you and no one has beaten your combo, the pile is discarded and you start a new one freely.
+                  </li>
+                  <li>
+                    <strong>Winning a Combo:</strong> When you beat a combo, you can choose to pick up the beaten cards (add to hand) or discard them.
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -448,8 +521,23 @@ const styles = {
   subtitle: {
     fontSize: '20px',
     color: '#666',
-    marginBottom: '40px',
+    marginBottom: '20px',
     fontWeight: '500'
+  },
+  rulesButton: {
+    background: 'transparent',
+    border: '2px solid #667eea',
+    color: '#667eea',
+    padding: '8px 16px',
+    borderRadius: '20px',
+    fontSize: '14px',
+    fontWeight: '700',
+    cursor: 'pointer',
+    marginBottom: '32px',
+    transition: 'all 0.2s',
+    ':hover': {
+      background: 'rgba(102, 126, 234, 0.1)'
+    }
   },
   nameInputSection: {
     marginBottom: '24px'
@@ -731,5 +819,99 @@ const styles = {
     fontWeight: '600',
     width: '100%',
     borderRadius: '8px'
+  },
+  modalOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    background: 'rgba(0, 0, 0, 0.6)',
+    backdropFilter: 'blur(8px)',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+    padding: '20px',
+    animation: 'fadeIn 0.3s ease-out'
+  },
+  modalContent: {
+    background: 'rgba(255, 255, 255, 0.95)',
+    borderRadius: '32px',
+    padding: '40px',
+    maxWidth: '600px',
+    width: '100%',
+    maxHeight: '85vh',
+    overflowY: 'auto',
+    boxShadow: '0 20px 60px rgba(0,0,0,0.3), 0 0 0 1px rgba(255,255,255,0.5) inset',
+    border: '1px solid rgba(255,255,255,0.2)',
+    animation: 'slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1)'
+  },
+  modalHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '32px',
+    borderBottom: '2px solid rgba(102, 126, 234, 0.1)',
+    paddingBottom: '20px'
+  },
+  modalTitle: {
+    fontSize: '32px',
+    fontWeight: '900',
+    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    WebkitBackgroundClip: 'text',
+    WebkitTextFillColor: 'transparent',
+    margin: 0,
+    letterSpacing: '-1px'
+  },
+  closeButton: {
+    background: 'rgba(0,0,0,0.05)',
+    border: 'none',
+    fontSize: '20px',
+    color: '#666',
+    cursor: 'pointer',
+    width: '40px',
+    height: '40px',
+    borderRadius: '50%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transition: 'all 0.2s',
+    ':hover': {
+      background: 'rgba(0,0,0,0.1)',
+      transform: 'rotate(90deg)'
+    }
+  },
+  modalBody: {
+    textAlign: 'left'
+  },
+  ruleSection: {
+    marginBottom: '32px',
+    background: 'rgba(248, 249, 250, 0.5)',
+    padding: '20px',
+    borderRadius: '16px',
+    border: '1px solid rgba(0,0,0,0.03)'
+  },
+  ruleTitle: {
+    fontSize: '20px',
+    fontWeight: '800',
+    color: '#444',
+    marginBottom: '12px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px'
+  },
+  ruleText: {
+    fontSize: '16px',
+    color: '#555',
+    lineHeight: '1.6',
+    margin: 0
+  },
+  ruleList: {
+    margin: '12px 0 0 20px',
+    padding: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px'
   }
 }
