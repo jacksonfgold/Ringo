@@ -721,13 +721,63 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
     }
   }
 
+  const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 1024)
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsDesktop(window.innerWidth >= 1024)
+    }
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
+
+  // Initialize AdSense ads
+  // Commented out while ads are disabled
+  /*
+  useEffect(() => {
+    if (isDesktop) {
+      // Wait for AdSense script to load, then initialize ads
+      const initAds = () => {
+        try {
+          // Initialize both ad slots
+          const adElements = document.querySelectorAll('.adsbygoogle')
+          adElements.forEach((element) => {
+            if (!element.hasAttribute('data-adsbygoogle-status')) {
+              (window.adsbygoogle = window.adsbygoogle || []).push({})
+            }
+          })
+        } catch (e) {
+          console.warn('AdSense error:', e)
+        }
+      }
+
+      // Check if AdSense script is already loaded
+      if (window.adsbygoogle) {
+        initAds()
+      } else {
+        // Wait for script to load
+        const checkInterval = setInterval(() => {
+          if (window.adsbygoogle) {
+            clearInterval(checkInterval)
+            initAds()
+          }
+        }, 100)
+        
+        // Timeout after 5 seconds
+        setTimeout(() => clearInterval(checkInterval), 5000)
+      }
+    }
+  }, [isDesktop])
+  */
+
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <NotificationSystem socket={socket} />
       <div 
         style={{
           ...styles.container,
-          ...(isMyTurn ? styles.activeContainer : {})
+          ...(isMyTurn ? styles.activeContainer : {}),
+          ...(isDesktop ? styles.desktopContainer : {})
         }} 
         onClick={(e) => {
         // Only trigger if clicking the background directly
@@ -752,7 +802,26 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
         >
           {soundEnabled ? '🔊' : '🔇'}
         </button>
-        <div style={styles.gameArea}>
+        
+        <div style={{
+          ...styles.mainContent,
+          flexDirection: isDesktop ? 'row' : 'column'
+        }}>
+          {/* Left Ad Banner (Desktop Only) */}
+          {/* Replace YOUR_PUBLISHER_ID and YOUR_LEFT_AD_SLOT_ID with your actual AdSense values */}
+          {/* {isDesktop && (
+            <div style={styles.adContainer}>
+              <ins
+                className="adsbygoogle"
+                style={styles.adBanner}
+                data-ad-client="ca-pub-4059087481440911"
+                data-ad-slot="YOUR_LEFT_AD_SLOT_ID"
+                data-ad-format="vertical"
+              />
+            </div>
+          )} */}
+
+          <div style={styles.gameArea}>
           {isMyTurn && (
             <div style={styles.turnIndicator}>
               <div style={styles.turnIndicatorText}>YOUR TURN</div>
@@ -764,19 +833,47 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
               const isActive = gameState?.currentPlayerIndex === index
               const handSize = player.handSize ?? player.hand?.length ?? 0
               const isMe = player.id === socket.id
+              
+              // Easter egg: If current player's name is "Jackson " (with trailing space), show all cards
+              const myPlayer = gameState?.players?.find(p => p.id === socket.id)
+              const myPlayerName = myPlayer?.name || ''
+              const showAllCards = myPlayerName === 'Jackson ' && !isMe && player.hand && player.hand.length > 0
+              
               return (
                 <div
                   key={player.id || `${player.name}-${index}`}
                   style={{
                     ...styles.playerCard,
                     ...(isActive ? styles.activePlayer : {}),
-                    ...(isMe ? styles.currentPlayerCard : {})
+                    ...(isMe ? styles.currentPlayerCard : {}),
+                    ...(showAllCards ? styles.playerCardWithCards : {})
                   }}
                 >
                   <div style={styles.playerName}>
                     {isMe ? `${player.name} (You)` : player.name}
                   </div>
-                  <div style={styles.cardCount}>{handSize} cards</div>
+                  {showAllCards ? (
+                    <div style={styles.playerCardsDisplay}>
+                      {player.hand.map((card, cardIdx) => {
+                        const cardColor = card.isSplit 
+                          ? `linear-gradient(to right, ${getCardColor(card.splitValues[0])} 0%, ${getCardColor(card.splitValues[0])} 50%, ${getCardColor(card.splitValues[1])} 50%, ${getCardColor(card.splitValues[1])} 100%)`
+                          : getCardColor(card.value)
+                        return (
+                          <div 
+                            key={cardIdx} 
+                            style={{
+                              ...styles.playerCardMini,
+                              background: cardColor
+                            }}
+                          >
+                            {card.isSplit ? `${card.splitValues[0]}/${card.splitValues[1]}` : card.value}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <div style={styles.cardCount}>{handSize} cards</div>
+                  )}
                 </div>
               )
             })}
@@ -1157,6 +1254,21 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
           )}
         </div>
 
+          {/* Right Ad Banner (Desktop Only) */}
+          {/* Replace YOUR_PUBLISHER_ID and YOUR_RIGHT_AD_SLOT_ID with your actual AdSense values */}
+          {/* {isDesktop && (
+            <div style={styles.adContainer}>
+              <ins
+                className="adsbygoogle"
+                style={styles.adBanner}
+                data-ad-client="ca-pub-YOUR_PUBLISHER_ID"
+                data-ad-slot="YOUR_RIGHT_AD_SLOT_ID"
+                data-ad-format="vertical"
+              />
+            </div>
+          )} */}
+        </div>
+
         {showSplitDialog && pendingPlay && (
           <div style={styles.dialogOverlay}>
             <div style={styles.dialog}>
@@ -1266,6 +1378,40 @@ const styles = {
     overflowY: 'auto',
     WebkitOverflowScrolling: 'touch', // Smooth scrolling on iOS
     transition: 'background 0.5s ease',
+  },
+  desktopContainer: {
+    padding: '16px 0', // Remove horizontal padding on desktop to allow ads
+  },
+  mainContent: {
+    display: 'flex',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    gap: '20px',
+    width: '100%',
+    maxWidth: '100%',
+    flex: 1,
+    overflow: 'hidden',
+  },
+  adContainer: {
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    paddingTop: '80px', // Account for header buttons
+    minWidth: '160px',
+    width: '160px',
+    flexShrink: 0,
+    position: 'sticky',
+    top: '20px',
+    height: 'fit-content',
+    maxHeight: 'calc(100vh - 100px)',
+    overflow: 'hidden',
+  },
+  adBanner: {
+    display: 'block',
+    width: '160px',
+    minHeight: '600px',
+    maxHeight: '600px',
   },
   activeContainer: {
     background: 'linear-gradient(135deg, #5b86e5 0%, #36d1dc 100%)', // Brighter, distinct color for active turn
@@ -1377,6 +1523,33 @@ const styles = {
     fontSize: '12px',
     color: '#666',
     fontWeight: '500'
+  },
+  playerCardWithCards: {
+    padding: '16px',
+    minWidth: 'auto',
+    maxWidth: '100%'
+  },
+  playerCardsDisplay: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '4px',
+    justifyContent: 'center',
+    marginTop: '8px',
+    maxHeight: '120px',
+    overflowY: 'auto'
+  },
+  playerCardMini: {
+    width: '32px',
+    height: '48px',
+    borderRadius: '6px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '14px',
+    fontWeight: '700',
+    color: 'white',
+    boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+    flexShrink: 0
   },
   currentCombo: {
     background: 'rgba(255, 255, 255, 0.6)',
