@@ -14,6 +14,8 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
   const [showNameInput, setShowNameInput] = useState(true)
   const [showRules, setShowRules] = useState(false)
   const [showBotMenu, setShowBotMenu] = useState(false)
+  const [editingBotId, setEditingBotId] = useState(null)
+  const [editingBotName, setEditingBotName] = useState('')
 
   const [copyFeedback, setCopyFeedback] = useState(false)
 
@@ -233,6 +235,39 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
     })
   }
 
+  const handleStartEditBot = (bot) => {
+    setEditingBotId(bot.id)
+    setEditingBotName(bot.name)
+  }
+
+  const handleSaveBotName = () => {
+    if (!editingBotId || !editingBotName.trim()) {
+      setEditingBotId(null)
+      return
+    }
+    
+    socket.emit('renameBot', { 
+      roomCode, 
+      botId: editingBotId, 
+      newName: editingBotName.trim() 
+    }, (response) => {
+      if (!response.success) {
+        alert(response.error || 'Failed to rename bot')
+      }
+      setEditingBotId(null)
+      setEditingBotName('')
+    })
+  }
+
+  const handleBotNameKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      handleSaveBotName()
+    } else if (e.key === 'Escape') {
+      setEditingBotId(null)
+      setEditingBotName('')
+    }
+  }
+
   const handleLeaveRoom = () => {
     if (roomCode) {
       socket.emit('leaveRoom', { roomCode })
@@ -305,16 +340,47 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
                   const winsFromRoom = roomPlayers?.find(p => p.id === player.id || p.name === player.name)?.wins
                   const displayWins = winsFromRoom ?? player.wins ?? 0
                   const isBot = player.isBot
+                  const isEditing = editingBotId === player.id
                   return (
                   <div key={player.id} style={{
                     ...styles.playerItem,
                     ...(isBot ? styles.botPlayerItem : {})
                   }}>
-                    <span style={styles.playerName}>
-                      {isBot && '🤖 '}
-                      {player.name} {player.id === socket?.id ? '(You)' : ''}
-                      {player.id === effectiveHostId && ' 👑'}
-                    </span>
+                    {isEditing ? (
+                      <div style={styles.botNameEditContainer}>
+                        <span>🤖 </span>
+                        <input
+                          type="text"
+                          value={editingBotName}
+                          onChange={(e) => setEditingBotName(e.target.value)}
+                          onKeyDown={handleBotNameKeyDown}
+                          onBlur={handleSaveBotName}
+                          style={styles.botNameInput}
+                          autoFocus
+                          maxLength={20}
+                        />
+                      </div>
+                    ) : (
+                      <span 
+                        style={{
+                          ...styles.playerName,
+                          ...(isBot && isHostEffective && gameState?.status !== 'PLAYING' ? styles.editableBotName : {})
+                        }}
+                        onClick={() => {
+                          if (isBot && isHostEffective && gameState?.status !== 'PLAYING') {
+                            handleStartEditBot(player)
+                          }
+                        }}
+                        title={isBot && isHostEffective && gameState?.status !== 'PLAYING' ? 'Click to rename' : ''}
+                      >
+                        {isBot && '🤖 '}
+                        {player.name} {player.id === socket?.id ? '(You)' : ''}
+                        {player.id === effectiveHostId && ' 👑'}
+                        {isBot && isHostEffective && gameState?.status !== 'PLAYING' && (
+                          <span style={styles.editIcon}>✏️</span>
+                        )}
+                      </span>
+                    )}
                     <div style={styles.playerRightSection}>
                       <span style={styles.playerWins}>{displayWins} wins</span>
                       {isBot && isHostEffective && gameState?.status !== 'PLAYING' && (
@@ -827,6 +893,34 @@ const styles = {
     fontSize: '12px',
     fontWeight: '700',
     transition: 'all 0.2s'
+  },
+  editableBotName: {
+    cursor: 'pointer',
+    borderRadius: '4px',
+    padding: '2px 4px',
+    transition: 'all 0.2s'
+  },
+  editIcon: {
+    marginLeft: '6px',
+    fontSize: '12px',
+    opacity: 0.6
+  },
+  botNameEditContainer: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+    flex: 1
+  },
+  botNameInput: {
+    background: 'rgba(102, 126, 234, 0.1)',
+    border: '2px solid #667eea',
+    borderRadius: '8px',
+    padding: '6px 10px',
+    fontSize: '16px',
+    fontWeight: '600',
+    color: '#333',
+    outline: 'none',
+    width: '150px'
   },
   addBotSection: {
     marginTop: '16px',

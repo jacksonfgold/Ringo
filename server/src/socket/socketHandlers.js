@@ -633,6 +633,54 @@ export function setupSocketHandlers(io) {
       }
     })
 
+    // Rename bot
+    socket.on('renameBot', (data, callback) => {
+      if (!checkRateLimit(socket.id)) {
+        return callback({ error: 'Rate limit exceeded' })
+      }
+
+      try {
+        const room = roomManager.getRoom(data.roomCode)
+        if (!room) {
+          return callback({ error: 'Room not found' })
+        }
+
+        if (room.hostId !== socket.id) {
+          return callback({ error: 'Only host can rename bots' })
+        }
+
+        if (room.gameState && room.gameState.status === GameStatus.PLAYING) {
+          return callback({ error: 'Cannot rename bots during a game' })
+        }
+
+        const bot = room.players.find(p => p.id === data.botId && p.isBot)
+        if (!bot) {
+          return callback({ error: 'Bot not found' })
+        }
+
+        const newName = (data.newName || '').trim()
+        if (!newName) {
+          return callback({ error: 'Name cannot be empty' })
+        }
+
+        if (newName.length > 20) {
+          return callback({ error: 'Name too long (max 20 characters)' })
+        }
+
+        bot.name = newName
+
+        io.to(room.code).emit('roomUpdate', {
+          players: room.players,
+          roomCode: room.code,
+          hostId: room.hostId
+        })
+
+        callback({ success: true, players: room.players })
+      } catch (error) {
+        callback({ error: error.message })
+      }
+    })
+
     socket.on('startGame', (data, callback) => {
       if (!checkRateLimit(socket.id)) {
         return callback({ error: 'Rate limit exceeded' })
