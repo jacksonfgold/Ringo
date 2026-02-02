@@ -3,6 +3,7 @@ import { DndContext, useDraggable, useDroppable, DragOverlay, useSensor, useSens
 import { CSS } from '@dnd-kit/utilities'
 import confetti from 'canvas-confetti'
 import { NotificationSystem } from './NotificationSystem'
+import { soundManager } from '../utils/soundEffects'
 
 // --- Draggable/Droppable Components ---
 
@@ -73,6 +74,10 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
   const [pendingPlay, setPendingPlay] = useState(null)
   const [activeDragId, setActiveDragId] = useState(null)
   const [invalidSelectionIndex, setInvalidSelectionIndex] = useState(null)
+  const [soundEnabled, setSoundEnabled] = useState(() => {
+    const saved = localStorage.getItem('ringo_soundEnabled')
+    return saved !== null ? saved === 'true' : true
+  })
 
   // Configure sensors for drag vs click distinction
   const mouseSensor = useSensor(MouseSensor, {
@@ -156,6 +161,7 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
   }
 
   const triggerInvalidSelection = (index) => {
+    soundManager.playInvalidMove()
     setInvalidSelectionIndex(index)
     setTimeout(() => setInvalidSelectionIndex(null), 350)
   }
@@ -234,10 +240,26 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
 
     const handleGameStateUpdate = (data) => {
       if (data.ringo) {
+        // Play RINGO sound when someone else calls it
+        const myIdx = data.gameState?.players?.findIndex(p => p.id === socket.id) ?? -1
+        if (data.gameState?.currentPlayerIndex !== myIdx) {
+          soundManager.playRINGO()
+        }
         // Show RINGO notification
         setTimeout(() => {
           // Notification handled
         }, 1000)
+      }
+      
+      // Play turn notification when it becomes your turn
+      if (data.gameState) {
+        const myIdx = data.gameState.players?.findIndex(p => p.id === socket.id) ?? -1
+        const isMyTurnNow = data.gameState.currentPlayerIndex === myIdx
+        const wasMyTurn = gameState?.currentPlayerIndex === myIdx
+        
+        if (isMyTurnNow && !wasMyTurn && data.gameState.status === 'PLAYING') {
+          soundManager.playTurnNotification()
+        }
       }
       // Only clear drawn card if it's not our turn or if we're not in a draw phase
       // Don't clear if we're still waiting for our action
@@ -385,6 +407,7 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
         // Selecting: must be adjacent to current selection
         if (selectedCards.length === 0) {
           if (getValidRingoCards.has(index)) {
+            soundManager.playCardSelect()
             setSelectedCards([index])
           } else {
             triggerInvalidSelection(index)
@@ -410,10 +433,12 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
               triggerInvalidSelection(index)
               return
             }
+            soundManager.playCardSelect()
             setSelectedCards([...sorted, index])
           } else {
             // Not adjacent: start new selection if valid
             if (getValidRingoCards.has(index)) {
+              soundManager.playCardSelect()
               setSelectedCards([index])
             } else {
               triggerInvalidSelection(index)
@@ -447,6 +472,7 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
     } else {
       // Check if card is adjacent to selected cards
       if (selectedCards.length === 0) {
+        soundManager.playCardSelect()
         setSelectedCards([index])
       } else {
         const sorted = [...selectedCards].sort((a, b) => a - b)
@@ -459,6 +485,7 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
             triggerInvalidSelection(index)
             return
           }
+          soundManager.playCardSelect()
           setSelectedCards([index, ...sorted])
         } else if (index === sorted[sorted.length - 1] + 1) {
           const possibleValues = getPossibleValuesForSelection(sorted)
@@ -469,9 +496,11 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
             triggerInvalidSelection(index)
             return
           }
+          soundManager.playCardSelect()
           setSelectedCards([...sorted, index])
         } else {
           // Not adjacent: start new selection
+          soundManager.playCardSelect()
           setSelectedCards([index])
         }
       }
@@ -489,12 +518,14 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
 
   const executePlay = (cardIndices, resolutions) => {
     console.log('[GameBoard] executePlay with roomCode:', effectiveRoomCode)
+    soundManager.playCardPlay()
     socket.emit('playCards', {
       roomCode: effectiveRoomCode,
       cardIndices,
       splitResolutions: resolutions
     }, (response) => {
       if (!response.success) {
+        soundManager.playInvalidMove()
         alert(response.error || 'Invalid play')
         setSelectedCards([])
         setSplitResolutions({})
@@ -504,10 +535,12 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
 
   const handleDraw = () => {
     console.log('[GameBoard] handleDraw with roomCode:', effectiveRoomCode)
+    soundManager.playDrawCard()
     socket.emit('drawCard', {
       roomCode: effectiveRoomCode
     }, (response) => {
       if (!response.success) {
+        soundManager.playInvalidMove()
         alert(response.error || 'Failed to draw card')
       }
     })
@@ -526,6 +559,7 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
   }
 
   const executeRINGO = (comboIndices, insertPosition, resolutions) => {
+    soundManager.playRINGO()
     socket.emit('ringo', {
       roomCode: effectiveRoomCode,
       comboIndices,
@@ -533,17 +567,20 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
       splitResolutions: resolutions
     }, (response) => {
       if (!response.success) {
+        soundManager.playInvalidMove()
         alert(response.error || 'Invalid RINGO')
       }
     })
   }
 
   const handleInsertCard = (position) => {
+    soundManager.playCardInsert()
     socket.emit('insertCard', {
       roomCode: effectiveRoomCode,
       insertPosition: position
     }, (response) => {
       if (!response.success) {
+        soundManager.playInvalidMove()
         alert(response.error || 'Failed to insert card')
       } else {
         setInsertingCard(false)
@@ -590,9 +627,14 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
     setPendingPlay(null)
   }
 
-  // Trigger confetti when game ends
+  // Trigger confetti and win sound when game ends
   useEffect(() => {
     if (gameState?.status === 'GAME_OVER') {
+      const isWinner = gameState.winner === socket.id
+      if (isWinner) {
+        soundManager.playWin()
+      }
+      
       try {
         const duration = 3000
         const end = Date.now() + duration
@@ -626,7 +668,7 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
         console.error('Confetti setup error:', e)
       }
     }
-  }, [gameState?.status])
+  }, [gameState?.status, gameState?.winner, socket.id])
 
   if (gameState?.status === 'GAME_OVER') {
     const winner = gameState.players?.find(p => p.id === gameState.winner)
@@ -699,6 +741,17 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
         >
           ← Home
         </button>
+        <button
+          onClick={() => {
+            const enabled = soundManager.toggle()
+            localStorage.setItem('ringo_soundEnabled', enabled.toString())
+            setSoundEnabled(enabled)
+          }}
+          style={styles.soundToggleButton}
+          title={soundEnabled ? 'Sound On' : 'Sound Off'}
+        >
+          {soundEnabled ? '🔊' : '🔇'}
+        </button>
         <div style={styles.gameArea}>
           {isMyTurn && (
             <div style={styles.turnIndicator}>
@@ -745,6 +798,10 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
                 <>
                   <div style={styles.comboLabel}>
                     Current Combo ({gameState.currentCombo.length} cards)
+                    {(() => {
+                      const owner = (gameState.players || roomPlayers).find(p => p.id === gameState.currentComboOwner)
+                      return owner ? <span style={styles.comboOwner}>Played by: {owner.name}</span> : null
+                    })()}
                   </div>
                   <div style={styles.comboCards}>
                     {gameState.currentCombo.map((card, idx) => {
@@ -1232,6 +1289,26 @@ const styles = {
       background: 'rgba(255, 255, 255, 0.3)'
     }
   },
+  soundToggleButton: {
+    position: 'absolute',
+    top: '16px',
+    right: '16px',
+    background: 'rgba(255, 255, 255, 0.2)',
+    color: 'white',
+    padding: '8px 12px',
+    fontSize: '18px',
+    fontWeight: '600',
+    borderRadius: '20px',
+    zIndex: 100,
+    backdropFilter: 'blur(10px)',
+    border: '1px solid rgba(255, 255, 255, 0.3)',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+    transition: 'all 0.2s',
+    cursor: 'pointer',
+    ':hover': {
+      background: 'rgba(255, 255, 255, 0.3)'
+    }
+  },
   gameArea: {
     flex: 1,
     display: 'flex',
@@ -1322,7 +1399,21 @@ const styles = {
     marginBottom: '16px',
     fontWeight: '700',
     textTransform: 'uppercase',
-    letterSpacing: '1px'
+    letterSpacing: '1px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+    alignItems: 'center'
+  },
+  comboOwner: {
+    fontSize: '12px',
+    color: '#667eea',
+    fontWeight: '600',
+    background: 'rgba(102, 126, 234, 0.1)',
+    padding: '4px 12px',
+    borderRadius: '12px',
+    textTransform: 'none',
+    letterSpacing: '0'
   },
   comboCards: {
     display: 'flex',
