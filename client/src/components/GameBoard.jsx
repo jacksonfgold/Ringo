@@ -78,6 +78,12 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
     const saved = localStorage.getItem('ringo_soundEnabled')
     return saved !== null ? saved === 'true' : true
   })
+  const [isDesktop, setIsDesktop] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth >= 1024
+    }
+    return false
+  })
 
   // Configure sensors for drag vs click distinction
   const mouseSensor = useSensor(MouseSensor, {
@@ -300,6 +306,14 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
       socket.off('gameStateUpdate', handleGameStateUpdate)
     }
   }, [socket])
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsDesktop(window.innerWidth >= 1024)
+    }
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
 
   const getCardPossibleValues = (card) => {
     if (!card) return []
@@ -720,16 +734,6 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
        setSelectedCards([])
     }
   }
-
-  const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 1024)
-
-  useEffect(() => {
-    const handleResize = () => {
-      setIsDesktop(window.innerWidth >= 1024)
-    }
-    window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
-  }, [])
 
   // Initialize AdSense ads
   // Commented out while ads are disabled
