@@ -13,6 +13,7 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
   })
   const [showNameInput, setShowNameInput] = useState(true)
   const [showRules, setShowRules] = useState(false)
+  const [showBotMenu, setShowBotMenu] = useState(false)
 
   const [copyFeedback, setCopyFeedback] = useState(false)
 
@@ -215,6 +216,23 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
     })
   }
 
+  const handleAddBot = (difficulty) => {
+    socket.emit('addBot', { roomCode, difficulty }, (response) => {
+      if (!response.success) {
+        alert(response.error || 'Failed to add bot')
+      }
+      setShowBotMenu(false)
+    })
+  }
+
+  const handleRemoveBot = (botId) => {
+    socket.emit('removeBot', { roomCode, botId }, (response) => {
+      if (!response.success) {
+        alert(response.error || 'Failed to remove bot')
+      }
+    })
+  }
+
   const handleLeaveRoom = () => {
     if (roomCode) {
       socket.emit('leaveRoom', { roomCode })
@@ -286,16 +304,79 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
                 {effectivePlayers.map((player, index) => {
                   const winsFromRoom = roomPlayers?.find(p => p.id === player.id || p.name === player.name)?.wins
                   const displayWins = winsFromRoom ?? player.wins ?? 0
+                  const isBot = player.isBot
                   return (
-                  <div key={player.id} style={styles.playerItem}>
+                  <div key={player.id} style={{
+                    ...styles.playerItem,
+                    ...(isBot ? styles.botPlayerItem : {})
+                  }}>
                     <span style={styles.playerName}>
+                      {isBot && '🤖 '}
                       {player.name} {player.id === socket?.id ? '(You)' : ''}
                       {player.id === effectiveHostId && ' 👑'}
                     </span>
-                    <span style={styles.playerWins}>{displayWins} wins</span>
+                    <div style={styles.playerRightSection}>
+                      <span style={styles.playerWins}>{displayWins} wins</span>
+                      {isBot && isHostEffective && gameState?.status !== 'PLAYING' && (
+                        <button 
+                          onClick={() => handleRemoveBot(player.id)}
+                          style={styles.removeBotButton}
+                          title="Remove bot"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )})}
               </div>
+              
+              {/* Add Bot Button */}
+              {isHostEffective && effectivePlayers.length < 5 && gameState?.status !== 'PLAYING' && (
+                <div style={styles.addBotSection}>
+                  <button 
+                    onClick={() => setShowBotMenu(!showBotMenu)}
+                    style={styles.addBotButton}
+                  >
+                    🤖 Add Bot
+                  </button>
+                  
+                  {showBotMenu && (
+                    <div style={styles.botMenu}>
+                      <button 
+                        onClick={() => handleAddBot('EASY')}
+                        style={styles.botDifficultyButton}
+                        onMouseOver={(e) => e.currentTarget.style.background = 'rgba(102, 126, 234, 0.1)'}
+                        onMouseOut={(e) => e.currentTarget.style.background = 'none'}
+                      >
+                        <span style={styles.botDifficultyIcon}>🟢</span>
+                        <span style={{ fontWeight: '600' }}>Rookie Bot</span>
+                        <span style={styles.botDifficultyDesc}>Plays simple moves</span>
+                      </button>
+                      <button 
+                        onClick={() => handleAddBot('MEDIUM')}
+                        style={styles.botDifficultyButton}
+                        onMouseOver={(e) => e.currentTarget.style.background = 'rgba(102, 126, 234, 0.1)'}
+                        onMouseOut={(e) => e.currentTarget.style.background = 'none'}
+                      >
+                        <span style={styles.botDifficultyIcon}>🟡</span>
+                        <span style={{ fontWeight: '600' }}>Pro Bot</span>
+                        <span style={styles.botDifficultyDesc}>Strategic play</span>
+                      </button>
+                      <button 
+                        onClick={() => handleAddBot('HARD')}
+                        style={styles.botDifficultyButton}
+                        onMouseOver={(e) => e.currentTarget.style.background = 'rgba(102, 126, 234, 0.1)'}
+                        onMouseOut={(e) => e.currentTarget.style.background = 'none'}
+                      >
+                        <span style={styles.botDifficultyIcon}>🔴</span>
+                        <span style={{ fontWeight: '600' }}>Master Bot</span>
+                        <span style={styles.botDifficultyDesc}>Expert tactics</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {gameState?.status === 'GAME_OVER' && (
@@ -722,6 +803,85 @@ const styles = {
     borderRadius: '20px',
     whiteSpace: 'nowrap',
     flexShrink: 0
+  },
+  playerRightSection: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px'
+  },
+  botPlayerItem: {
+    background: 'rgba(102, 126, 234, 0.05)',
+    borderLeft: '3px solid #667eea'
+  },
+  removeBotButton: {
+    background: 'rgba(255, 107, 107, 0.1)',
+    color: '#FF6B6B',
+    border: 'none',
+    borderRadius: '50%',
+    width: '24px',
+    height: '24px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    fontSize: '12px',
+    fontWeight: '700',
+    transition: 'all 0.2s'
+  },
+  addBotSection: {
+    marginTop: '16px',
+    position: 'relative'
+  },
+  addBotButton: {
+    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    color: 'white',
+    border: 'none',
+    padding: '12px 24px',
+    borderRadius: '12px',
+    fontSize: '16px',
+    fontWeight: '700',
+    cursor: 'pointer',
+    width: '100%',
+    transition: 'all 0.2s',
+    boxShadow: '0 4px 12px rgba(102, 126, 234, 0.3)'
+  },
+  botMenu: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    marginTop: '8px',
+    background: 'white',
+    borderRadius: '16px',
+    boxShadow: '0 8px 32px rgba(0,0,0,0.15)',
+    padding: '8px',
+    zIndex: 100,
+    animation: 'slideUp 0.2s ease-out'
+  },
+  botDifficultyButton: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: '2px',
+    width: '100%',
+    padding: '12px 16px',
+    background: 'none',
+    border: 'none',
+    borderRadius: '12px',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+    textAlign: 'left',
+    ':hover': {
+      background: 'rgba(102, 126, 234, 0.1)'
+    }
+  },
+  botDifficultyIcon: {
+    fontSize: '16px'
+  },
+  botDifficultyDesc: {
+    fontSize: '12px',
+    color: '#888',
+    fontWeight: '400'
   },
   startButton: {
     width: '100%',

@@ -8,8 +8,45 @@ import {
   handleDiscardDrawnCardWithTracking,
   handleCaptureDecision
 } from '../game/turnHandler.js'
+import { 
+  createBot, 
+  getBotDecision, 
+  isBot, 
+  BotDifficulty,
+  findRingoOpportunity
+} from '../game/aiBot.js'
 
 const rateLimiter = new Map()
+
+// Track which games have already had wins incremented to prevent double-counting
+const gamesWithWinsIncremented = new Set()
+
+function incrementWinnerWins(room, previousStatus) {
+  // Only increment if the game just became GAME_OVER (wasn't already GAME_OVER)
+  if (room.gameState.status === GameStatus.GAME_OVER && 
+      previousStatus !== GameStatus.GAME_OVER &&
+      room.gameState.winner) {
+    const gameKey = `${room.code}-${room.gameState.winner}`
+    
+    // Check if we've already incremented for this game/winner combination
+    if (!gamesWithWinsIncremented.has(gameKey)) {
+      const winner = room.players.find(p => p.id === room.gameState.winner)
+      if (winner) {
+        winner.wins = (winner.wins || 0) + 1
+        gamesWithWinsIncremented.add(gameKey)
+        
+        // Clean up old entries (keep only last 100 games)
+        if (gamesWithWinsIncremented.size > 100) {
+          const firstKey = gamesWithWinsIncremented.values().next().value
+          gamesWithWinsIncremented.delete(firstKey)
+        }
+        
+        return true // Wins were incremented
+      }
+    }
+  }
+  return false // Wins were not incremented
+}
 
 function buildPublicState(room, playerId) {
   if (!room?.gameState) return null
@@ -21,6 +58,338 @@ function buildPublicState(room, playerId) {
   }))
   publicState.hostId = room.hostId
   return publicState
+}
+
+// Store pending bot actions
+const botActionTimers = new Map()
+
+// Process bot turn with delay for realism
+async function processBotTurn(io, room, roomCode) {
+  if (!room || !room.gameState || room.gameState.status !== GameStatus.PLAYING) return
+  
+  const currentPlayer = room.gameState.players[room.gameState.currentPlayerIndex]
+  const roomPlayer = room.players.find(p => p.id === currentPlayer.id)
+  
+  if (!roomPlayer || !roomPlayer.isBot) return
+  
+  const botId = currentPlayer.id
+  const difficulty = roomPlayer.difficulty || BotDifficulty.EASY
+  
+  // Add delay for realism (1-2 seconds)
+  const delay = 1000 + Math.random() * 1000
+  
+  // Clear any existing timer for this room
+  if (botActionTimers.has(roomCode)) {
+    clearTimeout(botActionTimers.get(roomCode))
+  }
+  
+  const timer = setTimeout(async () => {
+    try {
+      await executeBotTurn(io, room, roomCode, botId, difficulty)
+    } catch (error) {
+      console.error('Bot turn error:', error)
+    }
+  }, delay)
+  
+  botActionTimers.set(roomCode, timer)
+}
+
+async function executeBotTurn(io, room, roomCode, botId, difficulty) {
+  if (!room || !room.gameState || room.gameState.status !== GameStatus.PLAYING) return
+  
+  const currentPlayer = room.gameState.players[room.gameState.currentPlayerIndex]
+  if (currentPlayer.id !== botId) return // Not bot's turn anymore
+  
+  const turnPhase = room.gameState.turnPhase
+  
+  if (turnPhase === 'WAITING_FOR_PLAY_OR_DRAW') {
+    // Bot decides to play or draw
+    const decision = getBotDecision(room.gameState, botId, difficulty, { phase: 'turn' })
+    
+    if (decision && decision.action === 'play') {
+      const result = handlePlay(room.gameState, botId, decision.indices, {})
+      
+      if (result.success) {
+        const previousStatus = room.gameState?.status
+        room.gameState = result.state
+        
+        const winsIncremented = incrementWinnerWins(room, previousStatus)
+        if (winsIncremented) {
+          io.to(room.code).emit('roomUpdate', {
+            players: room.players,
+            roomCode: room.code,
+            hostId: room.hostId
+          })
+        }
+        
+        // Broadcast to all players
+        room.players.forEach(player => {
+          if (!player.isBot) {
+            io.to(player.id).emit('gameStateUpdate', {
+              gameState: { ...buildPublicState(room, player.id), roomCode }
+            })
+          }
+        })
+        
+        // Notify about bot action
+        io.to(room.code).emit('playerNotification', {
+          type: 'info',
+          message: `played ${decision.indices.length} card${decision.indices.length > 1 ? 's' : ''}`,
+          playerName: room.players.find(p => p.id === botId)?.name || 'Bot',
+          cardInfo: []
+        })
+        
+        // Check for capture decision or continue
+        if (room.gameState.turnPhase === 'WAITING_FOR_CAPTURE_DECISION') {
+          setTimeout(() => executeBotCapture(io, room, roomCode, botId, difficulty), 800)
+        } else if (room.gameState.status === GameStatus.PLAYING) {
+          processBotTurn(io, room, roomCode)
+        }
+      }
+    } else {
+      // Draw
+      const result = handleDrawWithTracking(room.gameState, botId)
+      
+      if (result.success) {
+        room.gameState = result.state
+        
+        // Notify about draw
+        io.to(room.code).emit('playerNotification', {
+          type: 'draw',
+          message: 'drew a card',
+          playerName: room.players.find(p => p.id === botId)?.name || 'Bot',
+          cardInfo: []
+        })
+        
+        // Broadcast to all players
+        room.players.forEach(player => {
+          if (!player.isBot) {
+            io.to(player.id).emit('gameStateUpdate', {
+              gameState: { ...buildPublicState(room, player.id), roomCode }
+            })
+          }
+        })
+        
+        // Bot decides what to do with drawn card
+        setTimeout(() => executeBotDrawDecision(io, room, roomCode, botId, difficulty, result.drawnCard), 800)
+      }
+    }
+  } else if (turnPhase === 'WAITING_FOR_CAPTURE_DECISION') {
+    await executeBotCapture(io, room, roomCode, botId, difficulty)
+  }
+}
+
+async function executeBotDrawDecision(io, room, roomCode, botId, difficulty, drawnCard) {
+  if (!room || !room.gameState) return
+  
+  const bot = room.gameState.players.find(p => p.id === botId)
+  if (!bot) return
+  
+  // Check for RINGO opportunity
+  const ringoInfo = findRingoOpportunity(bot.hand, drawnCard, room.gameState.currentCombo)
+  const ringoPossible = ringoInfo !== null
+  
+  const decision = getBotDecision(room.gameState, botId, difficulty, {
+    phase: 'ringo',
+    drawnCard,
+    ringoPossible,
+    ringoInfo
+  })
+  
+  if (decision && decision.action === 'ringo' && ringoPossible) {
+    // Execute RINGO
+    const result = handleRINGOWithTracking(
+      room.gameState,
+      botId,
+      ringoInfo.comboIndices,
+      ringoInfo.insertPosition,
+      {}
+    )
+    
+    if (result.success) {
+      const previousStatus = room.gameState?.status
+      room.gameState = result.state
+      
+      const winsIncremented = incrementWinnerWins(room, previousStatus)
+      if (winsIncremented) {
+        io.to(room.code).emit('roomUpdate', {
+          players: room.players,
+          roomCode: room.code,
+          hostId: room.hostId
+        })
+      }
+      
+      room.players.forEach(player => {
+        if (!player.isBot) {
+          io.to(player.id).emit('gameStateUpdate', {
+            gameState: { ...buildPublicState(room, player.id), roomCode },
+            ringo: true
+          })
+        }
+      })
+      
+      io.to(room.code).emit('playerNotification', {
+        type: 'info',
+        message: 'called RINGO!',
+        playerName: room.players.find(p => p.id === botId)?.name || 'Bot',
+        cardInfo: []
+      })
+      
+      if (room.gameState.turnPhase === 'WAITING_FOR_CAPTURE_DECISION') {
+        setTimeout(() => executeBotCapture(io, room, roomCode, botId, difficulty), 800)
+      } else if (room.gameState.status === GameStatus.PLAYING) {
+        processBotTurn(io, room, roomCode)
+      }
+    }
+  } else {
+    // Insert the card
+    const bot = room.gameState.players.find(p => p.id === botId)
+    const insertDecision = getBotDecision(room.gameState, botId, difficulty, {
+      phase: 'insert',
+      drawnCard
+    })
+    
+    const result = handleInsertCardWithTracking(room.gameState, botId, insertDecision?.position || 0)
+    
+    if (result.success) {
+      const previousStatus = room.gameState?.status
+      room.gameState = result.state
+      
+      const winsIncremented = incrementWinnerWins(room, previousStatus)
+      if (winsIncremented) {
+        io.to(room.code).emit('roomUpdate', {
+          players: room.players,
+          roomCode: room.code,
+          hostId: room.hostId
+        })
+      }
+      
+      room.players.forEach(player => {
+        if (!player.isBot) {
+          io.to(player.id).emit('gameStateUpdate', {
+            gameState: { ...buildPublicState(room, player.id), roomCode }
+          })
+        }
+      })
+      
+      io.to(room.code).emit('playerNotification', {
+        type: 'info',
+        message: 'added a card to their hand',
+        playerName: room.players.find(p => p.id === botId)?.name || 'Bot',
+        cardInfo: []
+      })
+      
+      if (room.gameState.status === GameStatus.PLAYING) {
+        processBotTurn(io, room, roomCode)
+      }
+    }
+  }
+}
+
+async function executeBotCapture(io, room, roomCode, botId, difficulty) {
+  if (!room || !room.gameState || !room.gameState.pendingCapture) return
+  
+  const capturedCards = room.gameState.pendingCapture.cards
+  const decision = getBotDecision(room.gameState, botId, difficulty, {
+    phase: 'capture',
+    capturedCards
+  })
+  
+  if (!decision || decision.action === 'discard_all') {
+    const result = handleCaptureDecision(room.gameState, botId, 'discard_all')
+    
+    if (result.success) {
+      const previousStatus = room.gameState?.status
+      room.gameState = result.state
+      
+      const winsIncremented = incrementWinnerWins(room, previousStatus)
+      if (winsIncremented) {
+        io.to(room.code).emit('roomUpdate', {
+          players: room.players,
+          roomCode: room.code,
+          hostId: room.hostId
+        })
+      }
+      
+      room.players.forEach(player => {
+        if (!player.isBot) {
+          io.to(player.id).emit('gameStateUpdate', {
+            gameState: { ...buildPublicState(room, player.id), roomCode }
+          })
+        }
+      })
+      
+      io.to(room.code).emit('playerNotification', {
+        type: 'info',
+        message: 'discarded captured cards',
+        playerName: room.players.find(p => p.id === botId)?.name || 'Bot',
+        cardInfo: []
+      })
+      
+      if (room.gameState.status === GameStatus.PLAYING) {
+        processBotTurn(io, room, roomCode)
+      }
+    }
+  } else {
+    // Insert cards one by one
+    await insertCapturedCardsSequentially(io, room, roomCode, botId, difficulty, capturedCards)
+  }
+}
+
+async function insertCapturedCardsSequentially(io, room, roomCode, botId, difficulty, cards) {
+  for (const card of cards) {
+    if (!room.gameState || !room.gameState.pendingCapture) break
+    
+    const bot = room.gameState.players.find(p => p.id === botId)
+    const insertDecision = getBotDecision(room.gameState, botId, difficulty, {
+      phase: 'insert',
+      drawnCard: card
+    })
+    
+    const result = handleCaptureDecision(
+      room.gameState,
+      botId,
+      'insert_one',
+      insertDecision?.position || 0,
+      card.id
+    )
+    
+    if (result.success) {
+      const previousStatus = room.gameState?.status
+      room.gameState = result.state
+      
+      const winsIncremented = incrementWinnerWins(room, previousStatus)
+      if (winsIncremented) {
+        io.to(room.code).emit('roomUpdate', {
+          players: room.players,
+          roomCode: room.code,
+          hostId: room.hostId
+        })
+      }
+      
+      room.players.forEach(player => {
+        if (!player.isBot) {
+          io.to(player.id).emit('gameStateUpdate', {
+            gameState: { ...buildPublicState(room, player.id), roomCode }
+          })
+        }
+      })
+      
+      // Small delay between insertions
+      await new Promise(resolve => setTimeout(resolve, 300))
+    }
+  }
+  
+  io.to(room.code).emit('playerNotification', {
+    type: 'info',
+    message: 'picked up captured cards',
+    playerName: room.players.find(p => p.id === botId)?.name || 'Bot',
+    cardInfo: []
+  })
+  
+  if (room.gameState && room.gameState.status === GameStatus.PLAYING) {
+    processBotTurn(io, room, roomCode)
+  }
 }
 
 function checkRateLimit(socketId) {
@@ -183,6 +552,87 @@ export function setupSocketHandlers(io) {
       }
     })
 
+    // Add bot to room
+    socket.on('addBot', (data, callback) => {
+      if (!checkRateLimit(socket.id)) {
+        return callback({ error: 'Rate limit exceeded' })
+      }
+
+      try {
+        const room = roomManager.getRoom(data.roomCode)
+        if (!room) {
+          return callback({ error: 'Room not found' })
+        }
+
+        if (room.hostId !== socket.id) {
+          return callback({ error: 'Only host can add bots' })
+        }
+
+        if (room.players.length >= 5) {
+          return callback({ error: 'Room is full (max 5 players)' })
+        }
+
+        if (room.gameState && room.gameState.status === GameStatus.PLAYING) {
+          return callback({ error: 'Cannot add bots during a game' })
+        }
+
+        const difficulty = data.difficulty || BotDifficulty.EASY
+        const botNumber = room.players.filter(p => p.isBot).length + 1
+        const bot = createBot(difficulty, botNumber)
+        
+        room.players.push(bot)
+
+        io.to(room.code).emit('roomUpdate', {
+          players: room.players,
+          roomCode: room.code,
+          hostId: room.hostId
+        })
+
+        callback({ success: true, players: room.players })
+      } catch (error) {
+        callback({ error: error.message })
+      }
+    })
+
+    // Remove bot from room
+    socket.on('removeBot', (data, callback) => {
+      if (!checkRateLimit(socket.id)) {
+        return callback({ error: 'Rate limit exceeded' })
+      }
+
+      try {
+        const room = roomManager.getRoom(data.roomCode)
+        if (!room) {
+          return callback({ error: 'Room not found' })
+        }
+
+        if (room.hostId !== socket.id) {
+          return callback({ error: 'Only host can remove bots' })
+        }
+
+        if (room.gameState && room.gameState.status === GameStatus.PLAYING) {
+          return callback({ error: 'Cannot remove bots during a game' })
+        }
+
+        const botIndex = room.players.findIndex(p => p.id === data.botId && p.isBot)
+        if (botIndex === -1) {
+          return callback({ error: 'Bot not found' })
+        }
+
+        room.players.splice(botIndex, 1)
+
+        io.to(room.code).emit('roomUpdate', {
+          players: room.players,
+          roomCode: room.code,
+          hostId: room.hostId
+        })
+
+        callback({ success: true, players: room.players })
+      } catch (error) {
+        callback({ error: error.message })
+      }
+    })
+
     socket.on('startGame', (data, callback) => {
       if (!checkRateLimit(socket.id)) {
         return callback({ error: 'Rate limit exceeded' })
@@ -207,21 +657,35 @@ export function setupSocketHandlers(io) {
         }
 
         const previousWinner = room.gameState?.previousWinner || null
+        
+        // Clear wins tracking for the new game
+        const roomKey = room.code
+        for (const key of gamesWithWinsIncremented.keys()) {
+          if (key.startsWith(`${roomKey}-`)) {
+            gamesWithWinsIncremented.delete(key)
+          }
+        }
+        
         room.gameState = createGameState(room.players, previousWinner)
 
-        // Broadcast game state to all players
+        // Broadcast game state to all players (only non-bots)
         room.players.forEach(player => {
-          try {
-            const publicState = buildPublicState(room, player.id)
-            io.to(player.id).emit('gameStateUpdate', {
-              gameState: { ...publicState, roomCode: data.roomCode }
-            })
-          } catch (error) {
-            console.error(`Error sending game state to player ${player.id}:`, error)
+          if (!player.isBot) {
+            try {
+              const publicState = buildPublicState(room, player.id)
+              io.to(player.id).emit('gameStateUpdate', {
+                gameState: { ...publicState, roomCode: data.roomCode }
+              })
+            } catch (error) {
+              console.error(`Error sending game state to player ${player.id}:`, error)
+            }
           }
         })
 
         callback({ success: true })
+        
+        // Start bot turn if it's a bot's turn
+        processBotTurn(io, room, data.roomCode)
       } catch (error) {
         console.error('Error starting game:', error)
         callback({ error: error.message || 'Failed to start game' })
@@ -249,13 +713,11 @@ export function setupSocketHandlers(io) {
         return callback({ error: result.error })
       }
 
+      const previousStatus = room.gameState?.status
       room.gameState = result.state
 
-      if (room.gameState.status === GameStatus.GAME_OVER && room.gameState.winner) {
-        const winner = room.players.find(p => p.id === room.gameState.winner)
-        if (winner) {
-          winner.wins = (winner.wins || 0) + 1
-        }
+      const winsIncremented = incrementWinnerWins(room, previousStatus)
+      if (winsIncremented) {
         io.to(room.code).emit('roomUpdate', {
           players: room.players,
           roomCode: room.code,
@@ -265,14 +727,21 @@ export function setupSocketHandlers(io) {
 
       // Broadcast updated game state to all players
       room.players.forEach(player => {
-        io.to(player.id).emit('gameStateUpdate', {
-          gameState: { ...buildPublicState(room, player.id), roomCode: data.roomCode },
-          previousCombo: result.previousCombo,
-          playedCombo: result.playedCombo
-        })
+        if (!player.isBot) {
+          io.to(player.id).emit('gameStateUpdate', {
+            gameState: { ...buildPublicState(room, player.id), roomCode: data.roomCode },
+            previousCombo: result.previousCombo,
+            playedCombo: result.playedCombo
+          })
+        }
       })
 
       callback({ success: true })
+      
+      // Trigger bot turn if needed
+      if (room.gameState.status === GameStatus.PLAYING) {
+        processBotTurn(io, room, data.roomCode)
+      }
     })
 
     socket.on('drawCard', (data, callback) => {
@@ -343,13 +812,11 @@ export function setupSocketHandlers(io) {
         return callback({ error: result.error })
       }
 
+      const previousStatus = room.gameState?.status
       room.gameState = result.state
 
-      if (room.gameState.status === GameStatus.GAME_OVER && room.gameState.winner) {
-        const winner = room.players.find(p => p.id === room.gameState.winner)
-        if (winner) {
-          winner.wins = (winner.wins || 0) + 1
-        }
+      const winsIncremented = incrementWinnerWins(room, previousStatus)
+      if (winsIncremented) {
         io.to(room.code).emit('roomUpdate', {
           players: room.players,
           roomCode: room.code,
@@ -402,11 +869,9 @@ export function setupSocketHandlers(io) {
       }
 
       // If game ended, update win counts and send roomUpdate
-      if (room.gameState.status === GameStatus.GAME_OVER && room.gameState.winner) {
-        const winner = room.players.find(p => p.id === room.gameState.winner)
-        if (winner) {
-          winner.wins = (winner.wins || 0) + 1
-        }
+      const previousStatus = room.gameState?.status
+      const winsIncremented = incrementWinnerWins(room, previousStatus)
+      if (winsIncremented) {
         io.to(room.code).emit('roomUpdate', {
           players: room.players,
           roomCode: room.code,
@@ -416,12 +881,19 @@ export function setupSocketHandlers(io) {
 
       // Broadcast updated game state to all players
       room.players.forEach(player => {
-        io.to(player.id).emit('gameStateUpdate', {
-          gameState: { ...buildPublicState(room, player.id), roomCode: data.roomCode }
-        })
+        if (!player.isBot) {
+          io.to(player.id).emit('gameStateUpdate', {
+            gameState: { ...buildPublicState(room, player.id), roomCode: data.roomCode }
+          })
+        }
       })
 
       callback({ success: true })
+      
+      // Trigger bot turn if needed
+      if (room.gameState.status === GameStatus.PLAYING) {
+        processBotTurn(io, room, data.roomCode)
+      }
     })
 
     socket.on('discardCard', (data, callback) => {
@@ -454,11 +926,9 @@ export function setupSocketHandlers(io) {
       })
 
       // If game ended, update win counts and send roomUpdate
-      if (room.gameState.status === GameStatus.GAME_OVER && room.gameState.winner) {
-        const winner = room.players.find(p => p.id === room.gameState.winner)
-        if (winner) {
-          winner.wins = (winner.wins || 0) + 1
-        }
+      const previousStatus = room.gameState?.status
+      const winsIncremented = incrementWinnerWins(room, previousStatus)
+      if (winsIncremented) {
         io.to(room.code).emit('roomUpdate', {
           players: room.players,
           roomCode: room.code,
@@ -535,11 +1005,9 @@ export function setupSocketHandlers(io) {
       }
 
       // If game ended, update win counts and send roomUpdate
-      if (room.gameState.status === GameStatus.GAME_OVER && room.gameState.winner) {
-        const winner = room.players.find(p => p.id === room.gameState.winner)
-        if (winner) {
-          winner.wins = (winner.wins || 0) + 1
-        }
+      const previousStatus = room.gameState?.status
+      const winsIncremented = incrementWinnerWins(room, previousStatus)
+      if (winsIncremented) {
         io.to(room.code).emit('roomUpdate', {
           players: room.players,
           roomCode: room.code,
@@ -548,12 +1016,19 @@ export function setupSocketHandlers(io) {
       }
 
       room.players.forEach(player => {
-        io.to(player.id).emit('gameStateUpdate', {
-          gameState: { ...buildPublicState(room, player.id), roomCode: data.roomCode }
-        })
+        if (!player.isBot) {
+          io.to(player.id).emit('gameStateUpdate', {
+            gameState: { ...buildPublicState(room, player.id), roomCode: data.roomCode }
+          })
+        }
       })
 
       callback({ success: true })
+      
+      // Trigger bot turn if needed
+      if (room.gameState.status === GameStatus.PLAYING) {
+        processBotTurn(io, room, data.roomCode)
+      }
     })
 
     socket.on('disconnect', () => {
