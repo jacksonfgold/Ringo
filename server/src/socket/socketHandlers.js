@@ -782,9 +782,11 @@ export function setupSocketHandlers(io) {
 
       // Broadcast updated game state (without drawn card info) to all players
       room.players.forEach(player => {
-        io.to(player.id).emit('gameStateUpdate', {
-          gameState: { ...buildPublicState(room, player.id), roomCode: data.roomCode }
-        })
+        if (!player.isBot) {
+          io.to(player.id).emit('gameStateUpdate', {
+            gameState: { ...buildPublicState(room, player.id), roomCode: data.roomCode }
+          })
+        }
       })
 
       callback({ success: true, ringoPossible: result.ringoPossible })
@@ -826,15 +828,22 @@ export function setupSocketHandlers(io) {
 
       // Broadcast updated game state to all players
       room.players.forEach(player => {
-        io.to(player.id).emit('gameStateUpdate', {
-          gameState: { ...buildPublicState(room, player.id), roomCode: data.roomCode },
-          previousCombo: result.previousCombo,
-          playedCombo: result.playedCombo,
-          ringo: true
-        })
+        if (!player.isBot) {
+          io.to(player.id).emit('gameStateUpdate', {
+            gameState: { ...buildPublicState(room, player.id), roomCode: data.roomCode },
+            previousCombo: result.previousCombo,
+            playedCombo: result.playedCombo,
+            ringo: true
+          })
+        }
       })
 
       callback({ success: true })
+      
+      // Trigger bot turn if needed
+      if (room.gameState.status === GameStatus.PLAYING) {
+        processBotTurn(io, room, data.roomCode)
+      }
     })
 
     socket.on('insertCard', (data, callback) => {
@@ -938,12 +947,19 @@ export function setupSocketHandlers(io) {
 
       // Broadcast updated game state to all players
       room.players.forEach(player => {
-        io.to(player.id).emit('gameStateUpdate', {
-          gameState: { ...buildPublicState(room, player.id), roomCode: data.roomCode }
-        })
+        if (!player.isBot) {
+          io.to(player.id).emit('gameStateUpdate', {
+            gameState: { ...buildPublicState(room, player.id), roomCode: data.roomCode }
+          })
+        }
       })
 
       callback({ success: true })
+      
+      // Trigger bot turn if needed
+      if (room.gameState.status === GameStatus.PLAYING) {
+        processBotTurn(io, room, data.roomCode)
+      }
     })
 
     socket.on('captureCombo', (data, callback) => {
