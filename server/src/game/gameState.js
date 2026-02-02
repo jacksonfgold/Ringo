@@ -129,6 +129,7 @@ export function checkPileClosing(state) {
 
 export function shuffleDiscardIntoDraw(state) {
   if (state.drawPile.length === 0 && state.discardPile.length > 0) {
+    // Shuffle the discard pile and make it the new draw pile
     const shuffled = shuffleDeck([...state.discardPile])
     return updateGameState(state, {
       drawPile: shuffled,

@@ -37,10 +37,10 @@ export function createDeck() {
   let cardId = 0
 
   // Standard cards (values 1-8)
-  // Note: Exact deck composition to be provided
-  // For now, creating a basic deck structure
+  // 9 cards per value to ensure enough cards for 5 players (8 cards each = 40 needed)
+  // Total: 8 values × 9 cards = 72 standard cards
   const standardValues = [1, 2, 3, 4, 5, 6, 7, 8]
-  const cardsPerValue = 4
+  const cardsPerValue = 9
 
   standardValues.forEach(value => {
     for (let i = 0; i < cardsPerValue; i++) {
@@ -48,10 +48,13 @@ export function createDeck() {
     }
   })
 
-  // Split cards (e.g., 5/6)
-  // Add split cards as needed - example: 5/6 split card
+  // Split cards (5/6) - 8 split cards total
   deck.push(new Card(cardId++, 5, true, [5, 6]))
   deck.push(new Card(cardId++, 5, true, [5, 6]))
+  deck.push(new Card(cardId++, 5, true, [5, 6]))
+  deck.push(new Card(cardId++, 5, true, [5, 6]))
+  deck.push(new Card(cardId++, 6, true, [5, 6]))
+  deck.push(new Card(cardId++, 6, true, [5, 6]))
   deck.push(new Card(cardId++, 6, true, [5, 6]))
   deck.push(new Card(cardId++, 6, true, [5, 6]))
 
