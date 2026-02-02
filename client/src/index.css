@@ -89,12 +89,16 @@ html, body, #root {
 }
 
 @keyframes ringoShake {
-  0% { transform: translateX(0); }
-  20% { transform: translateX(-4px); }
-  40% { transform: translateX(4px); }
-  60% { transform: translateX(-3px); }
-  80% { transform: translateX(3px); }
-  100% { transform: translateX(0); }
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  10% { transform: translate(-10px, -5px) rotate(-2deg); }
+  20% { transform: translate(10px, 5px) rotate(2deg); }
+  30% { transform: translate(-8px, 8px) rotate(-1deg); }
+  40% { transform: translate(8px, -8px) rotate(1deg); }
+  50% { transform: translate(-6px, 6px) rotate(-2deg); }
+  60% { transform: translate(6px, -6px) rotate(2deg); }
+  70% { transform: translate(-4px, 4px) rotate(-1deg); }
+  80% { transform: translate(4px, -4px) rotate(1deg); }
+  90% { transform: translate(-2px, 2px) rotate(-0.5deg); }
 }
 
 @keyframes slideUp {
@@ -119,13 +123,114 @@ html, body, #root {
   100% { transform: scale(1); }
 }
 
+@keyframes pulseRing {
+  0% {
+    transform: scale(1);
+    opacity: 0.3;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 0.5;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 0.3;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% center;
+  }
+  100% {
+    background-position: 200% center;
+  }
+}
+
+@keyframes glow {
+  0%, 100% {
+    opacity: 0.4;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  50% {
+    opacity: 0.8;
+    transform: translate(-50%, -50%) scale(1.2);
+  }
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateX(-50%) translateY(0);
+  }
+  50% {
+    transform: translateX(-50%) translateY(-4px);
+  }
+}
+
+@keyframes sparkle {
+  0%, 100% {
+    opacity: 0;
+    transform: scale(0) rotate(0deg);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1) rotate(180deg);
+  }
+}
+
+@keyframes ringoFlash {
+  0%, 100% {
+    opacity: 0.4;
+    background: rgba(255, 0, 0, 0.4);
+  }
+  12.5% {
+    opacity: 0.7;
+    background: rgba(255, 255, 0, 0.5);
+  }
+  25% {
+    opacity: 0.9;
+    background: rgba(255, 0, 0, 0.6);
+  }
+  37.5% {
+    opacity: 0.7;
+    background: rgba(255, 255, 0, 0.5);
+  }
+  50% {
+    opacity: 0.9;
+    background: rgba(255, 0, 0, 0.6);
+  }
+  62.5% {
+    opacity: 0.7;
+    background: rgba(255, 255, 0, 0.5);
+  }
+  75% {
+    opacity: 0.9;
+    background: rgba(255, 0, 0, 0.6);
+  }
+  87.5% {
+    opacity: 0.7;
+    background: rgba(255, 255, 0, 0.5);
+  }
+}
+
+@keyframes ringoTextPulse {
+  0%, 100% {
+    transform: rotate(-5deg) scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: rotate(-5deg) scale(1.1);
+    opacity: 0.9;
+  }
+}
+
 @keyframes slideIn {
   from {
     opacity: 0;
-    transform: translateX(-50%) translateY(-20px);
+    transform: translateX(20px);
   }
   to {
     opacity: 1;
-    transform: translateX(-50%) translateY(0);
+    transform: translateX(0);
   }
 }

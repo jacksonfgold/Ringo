@@ -48,7 +48,12 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
     if (!socket) return
 
     socket.on('roomUpdate', (data) => {
-      setPlayers(data.players || [])
+      console.log('[RoomLobby] roomUpdate received:', data)
+      // Always update players from roomUpdate - this is the source of truth
+      if (data.players && Array.isArray(data.players)) {
+        setPlayers(data.players)
+        console.log('[RoomLobby] Updated players list:', data.players.map(p => ({ id: p.id, name: p.name, isBot: p.isBot })))
+      }
       if (data.roomCode) {
         setRoomCode(data.roomCode)
       }
@@ -72,9 +77,10 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
     }
   }, [roomHostId, socket?.id])
 
-  // Sync players list from app-level roomPlayers (useSocket)
+  // Sync players list from app-level roomPlayers (useSocket) - this is the source of truth
   useEffect(() => {
     if (roomPlayers && roomPlayers.length > 0) {
+      // Always use roomPlayers as the primary source when available
       setPlayers(roomPlayers)
     }
   }, [roomPlayers])
@@ -82,10 +88,11 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
   // Fallback: if lobby is shown after game over and roomPlayers is empty,
   // use the players from the last gameState so the list isn't blank.
   useEffect(() => {
-    if (players.length === 0 && gameState?.players?.length > 0) {
+    // Only use gameState players if we don't have roomPlayers
+    if ((!roomPlayers || roomPlayers.length === 0) && gameState?.players?.length > 0 && players.length === 0) {
       setPlayers(gameState.players)
     }
-  }, [players.length, gameState?.players])
+  }, [roomPlayers, gameState?.players, players.length])
 
   const handleCreateRoom = () => {
     if (!playerName.trim()) {
@@ -280,9 +287,24 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
     }
   }
 
+  // Prioritize roomPlayers (from useSocket/roomUpdate) as the source of truth
+  // Only fall back to local players state or gameState if roomPlayers is not available
   const effectivePlayers = (roomPlayers && roomPlayers.length > 0)
     ? roomPlayers
     : (players.length > 0 ? players : (gameState?.players || []))
+  
+  // Remove duplicates based on ID, keeping the most recent data
+  const uniquePlayers = effectivePlayers.reduce((acc, player) => {
+    const existing = acc.find(p => p.id === player.id)
+    if (!existing) {
+      acc.push(player)
+    } else {
+      // Update existing player with latest data (prefer roomPlayers data)
+      const index = acc.indexOf(existing)
+      acc[index] = player
+    }
+    return acc
+  }, [])
 
   const effectiveHostId = roomHostId || hostId || (roomPlayers && roomPlayers.length > 0
     ? roomPlayers[0]?.id
@@ -334,9 +356,9 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
             </div>
 
             <div style={styles.playersSection}>
-              <h2 style={styles.sectionTitle}>Players ({(effectivePlayers.length || 0)}/5)</h2>
+              <h2 style={styles.sectionTitle}>Players ({(uniquePlayers.length || 0)}/5)</h2>
               <div style={styles.playersList}>
-                {effectivePlayers.map((player, index) => {
+                {uniquePlayers.map((player, index) => {
                   const winsFromRoom = roomPlayers?.find(p => p.id === player.id || p.name === player.name)?.wins
                   const displayWins = winsFromRoom ?? player.wins ?? 0
                   const isBot = player.isBot
@@ -398,7 +420,7 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
               </div>
               
               {/* Add Bot Button */}
-              {isHostEffective && effectivePlayers.length < 5 && gameState?.status !== 'PLAYING' && (
+              {isHostEffective && uniquePlayers.length < 5 && gameState?.status !== 'PLAYING' && (
                 <div style={styles.addBotSection}>
                   <button 
                     onClick={() => setShowBotMenu(!showBotMenu)}
@@ -465,7 +487,7 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
               </button>
             )}
 
-            {isHostEffective && effectivePlayers.length >= 2 && gameState?.status !== 'GAME_OVER' && (
+            {isHostEffective && uniquePlayers.length >= 2 && gameState?.status !== 'GAME_OVER' && (
               <button
                 onClick={handleStartGame}
                 style={styles.startButton}
@@ -474,7 +496,7 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
               </button>
             )}
 
-            {isHostEffective && effectivePlayers.length < 2 && (
+            {isHostEffective && uniquePlayers.length < 2 && (
               <div style={styles.waitingText}>
                 Waiting for more players (need at least 2)
               </div>

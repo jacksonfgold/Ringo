@@ -477,9 +477,10 @@ export function setupSocketHandlers(io) {
         const previousPlayerId = rejoinResult.oldId
         socket.join(room.code)
         
-        // If game is in progress, update player ID in game state
+        // If game is in progress, update player ID and name in game state
         if (room.gameState) {
           const normalizedName = (data.playerName || '').trim().toLowerCase()
+          const trimmedName = (data.playerName || '').trim()
           const playerInGame = room.gameState.players.find(
             p => (p.name || '').trim().toLowerCase() === normalizedName
           ) || (previousPlayerId ? room.gameState.players.find(p => p.id === previousPlayerId) : null)
@@ -489,6 +490,11 @@ export function setupSocketHandlers(io) {
             console.log(`[REJOIN] Current player index: ${room.gameState.currentPlayerIndex}`)
             console.log(`[REJOIN] Player index before update: ${room.gameState.players.findIndex(p => p.id === oldId)}`)
             playerInGame.id = socket.id
+            // Update name in game state if it changed
+            if (playerInGame.name !== trimmedName) {
+              playerInGame.name = trimmedName
+              console.log(`[REJOIN] Updated player name to ${trimmedName}`)
+            }
             console.log(`[REJOIN] Player index after update: ${room.gameState.players.findIndex(p => p.id === socket.id)}`)
             console.log(`[REJOIN] Is rejoining player's turn? ${room.gameState.currentPlayerIndex === room.gameState.players.findIndex(p => p.id === socket.id)}`)
             

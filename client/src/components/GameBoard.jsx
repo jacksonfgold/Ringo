@@ -84,6 +84,7 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
     }
     return false
   })
+  const [ringoShake, setRingoShake] = useState(false)
 
   // Configure sensors for drag vs click distinction
   const mouseSensor = useSensor(MouseSensor, {
@@ -246,10 +247,15 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
 
     const handleGameStateUpdate = (data) => {
       if (data.ringo) {
-        // Play RINGO sound when someone else calls it
+        // Play RINGO sound and trigger annoying animation when someone else calls it
         const myIdx = data.gameState?.players?.findIndex(p => p.id === socket.id) ?? -1
-        if (data.gameState?.currentPlayerIndex !== myIdx) {
+        const isOtherPlayerRingo = data.gameState?.currentPlayerIndex !== myIdx
+        
+        if (isOtherPlayerRingo) {
           soundManager.playRINGO()
+          // Trigger annoying shake animation
+          setRingoShake(true)
+          setTimeout(() => setRingoShake(false), 2000)
         }
         // Show RINGO notification
         setTimeout(() => {
@@ -781,7 +787,8 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
         style={{
           ...styles.container,
           ...(isMyTurn ? styles.activeContainer : {}),
-          ...(isDesktop ? styles.desktopContainer : {})
+          ...(isDesktop ? styles.desktopContainer : {}),
+          ...(ringoShake ? styles.ringoShakeContainer : {})
         }} 
         onClick={(e) => {
         // Only trigger if clicking the background directly
@@ -789,6 +796,11 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
           handleBackgroundClick(e)
         }
       }}>
+        {ringoShake && (
+          <div style={styles.ringoFlashOverlay}>
+            <div style={styles.ringoFlashText}>RINGO!!!</div>
+          </div>
+        )}
         <button
           onClick={onGoHome}
           style={styles.homeButton}
@@ -826,11 +838,6 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
           )} */}
 
           <div style={styles.gameArea}>
-          {isMyTurn && (
-            <div style={styles.turnIndicator}>
-              <div style={styles.turnIndicatorText}>YOUR TURN</div>
-            </div>
-          )}
           {/* Players */}
           <div style={styles.otherPlayers}>
             {(gameState?.players?.length ? gameState.players : roomPlayers).map((player, index) => {
@@ -843,6 +850,8 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
               const myPlayerName = myPlayer?.name || ''
               const showAllCards = myPlayerName === 'Jackson ' && !isMe && player.hand && player.hand.length > 0
               
+              const isBot = roomPlayers.find(p => p.id === player.id)?.isBot
+              
               return (
                 <div
                   key={player.id || `${player.name}-${index}`}
@@ -850,10 +859,55 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
                     ...styles.playerCard,
                     ...(isActive ? styles.activePlayer : {}),
                     ...(isMe ? styles.currentPlayerCard : {}),
-                    ...(showAllCards ? styles.playerCardWithCards : {})
+                    ...(showAllCards ? styles.playerCardWithCards : {}),
+                    position: 'relative'
                   }}
                 >
+                  {isActive && (
+                    <div style={{
+                      ...styles.turnIndicatorBadge,
+                      background: isMe 
+                        ? 'linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%)'
+                        : 'linear-gradient(135deg, #2ecc71 0%, #27ae60 50%, #16a085 100%)',
+                      boxShadow: isMe
+                        ? '0 8px 32px rgba(102, 126, 234, 0.6), 0 4px 16px rgba(118, 75, 162, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3)'
+                        : '0 8px 32px rgba(46, 204, 113, 0.6), 0 4px 16px rgba(39, 174, 96, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3)',
+                      animation: 'float 3s ease-in-out infinite'
+                    }}>
+                      <div style={{
+                        ...styles.turnIndicatorBadgeGlow,
+                        background: isMe
+                          ? 'radial-gradient(circle, rgba(102, 126, 234, 0.6) 0%, transparent 70%)'
+                          : 'radial-gradient(circle, rgba(46, 204, 113, 0.6) 0%, transparent 70%)',
+                        animation: 'glow 2s ease-in-out infinite'
+                      }}></div>
+                      <div style={styles.turnIndicatorBadgeShimmer}></div>
+                      <div style={{
+                        ...styles.turnIndicatorBadgePulse,
+                        background: isMe
+                          ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+                          : 'linear-gradient(135deg, #2ecc71 0%, #27ae60 100%)'
+                      }}></div>
+                      <div style={{
+                        ...styles.turnIndicatorBadgePulse2,
+                        background: isMe
+                          ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+                          : 'linear-gradient(135deg, #2ecc71 0%, #27ae60 100%)'
+                      }}></div>
+                      <div style={styles.turnIndicatorBadgeContent}>
+                        <div style={styles.turnIndicatorIcon}>✨</div>
+                        <div style={styles.turnIndicatorBadgeText}>
+                          {isMe ? 'YOUR TURN' : 'CURRENT TURN'}
+                        </div>
+                        <div style={styles.turnIndicatorIcon}>✨</div>
+                      </div>
+                      <div style={{...styles.turnIndicatorSparkle, top: '20%', left: '20%'}}></div>
+                      <div style={{...styles.turnIndicatorSparkle, top: '50%', right: '15%', animationDelay: '0.3s'}}></div>
+                      <div style={{...styles.turnIndicatorSparkle, bottom: '20%', left: '50%', animationDelay: '0.6s'}}></div>
+                    </div>
+                  )}
                   <div style={styles.playerName}>
+                    {isBot && '🤖 '}
                     {isMe ? `${player.name} (You)` : player.name}
                   </div>
                   {showAllCards ? (
@@ -1420,6 +1474,37 @@ const styles = {
   activeContainer: {
     background: 'linear-gradient(135deg, #5b86e5 0%, #36d1dc 100%)', // Brighter, distinct color for active turn
   },
+  ringoShakeContainer: {
+    animation: 'ringoShake 0.5s ease-in-out infinite'
+  },
+  ringoFlashOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 10000,
+    pointerEvents: 'none',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'rgba(255, 0, 0, 0.3)',
+    animation: 'ringoFlash 0.5s ease-in-out infinite',
+    mixBlendMode: 'screen'
+  },
+  ringoFlashText: {
+    fontSize: 'clamp(60px, 12vw, 120px)',
+    fontWeight: '900',
+    color: '#FF0000',
+    textShadow: '0 0 40px #FF0000, 0 0 80px #FF0000, 0 0 120px #FF0000, 0 0 160px #FF0000',
+    animation: 'ringoTextPulse 0.15s ease-in-out infinite',
+    letterSpacing: 'clamp(10px, 2vw, 20px)',
+    textTransform: 'uppercase',
+    transform: 'rotate(-5deg)',
+    filter: 'drop-shadow(0 0 30px rgba(255, 0, 0, 0.8))',
+    userSelect: 'none',
+    WebkitUserSelect: 'none'
+  },
   homeButton: {
     position: 'absolute',
     top: '16px',
@@ -1493,29 +1578,107 @@ const styles = {
   },
   activePlayer: {
     border: '3px solid #667eea',
-    boxShadow: '0 0 0 4px rgba(102, 126, 234, 0.2)',
-    transform: 'scale(1.05)',
+    boxShadow: '0 0 0 4px rgba(102, 126, 234, 0.2), 0 8px 24px rgba(102, 126, 234, 0.3)',
+    transform: 'scale(1.08)',
     zIndex: 2,
-    background: 'rgba(255, 255, 255, 0.95)'
+    background: 'rgba(255, 255, 255, 0.98)',
+    position: 'relative'
   },
-  turnIndicator: {
+  turnIndicatorBadge: {
     position: 'absolute',
-    top: '20px',
+    top: '-18px',
     left: '50%',
     transform: 'translateX(-50%)',
-    zIndex: 90,
-    animation: 'pulse 2s infinite'
-  },
-  turnIndicatorText: {
-    background: 'linear-gradient(135deg, #2ecc71 0%, #27ae60 100%)',
+    zIndex: 10,
     color: 'white',
-    padding: '8px 24px',
-    borderRadius: '20px',
+    padding: '10px 24px',
+    borderRadius: '30px',
+    fontSize: '13px',
     fontWeight: '900',
-    fontSize: '16px',
-    letterSpacing: '2px',
-    boxShadow: '0 4px 12px rgba(46, 204, 113, 0.4)',
-    textTransform: 'uppercase'
+    letterSpacing: '1.5px',
+    textTransform: 'uppercase',
+    whiteSpace: 'nowrap',
+    animation: 'float 3s ease-in-out infinite, glow 2s ease-in-out infinite',
+    overflow: 'hidden',
+    border: '2px solid rgba(255, 255, 255, 0.3)',
+    backdropFilter: 'blur(10px)',
+    position: 'relative'
+  },
+  turnIndicatorBadgeContent: {
+    position: 'relative',
+    zIndex: 3,
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    justifyContent: 'center'
+  },
+  turnIndicatorIcon: {
+    fontSize: '14px',
+    animation: 'sparkle 2s ease-in-out infinite',
+    filter: 'drop-shadow(0 0 4px rgba(255, 255, 255, 0.8))'
+  },
+  turnIndicatorBadgeText: {
+    position: 'relative',
+    zIndex: 2,
+    textShadow: '0 2px 8px rgba(0, 0, 0, 0.3), 0 0 12px rgba(255, 255, 255, 0.5)',
+    filter: 'drop-shadow(0 1px 2px rgba(0, 0, 0, 0.2))'
+  },
+  turnIndicatorBadgeGlow: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    transform: 'translate(-50%, -50%)',
+    width: '150%',
+    height: '150%',
+    borderRadius: '50%',
+    zIndex: 0,
+    pointerEvents: 'none',
+    opacity: 0.6
+  },
+  turnIndicatorBadgeShimmer: {
+    position: 'absolute',
+    top: 0,
+    left: '-100%',
+    width: '100%',
+    height: '100%',
+    background: 'linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent)',
+    zIndex: 4,
+    animation: 'shimmer 3s infinite',
+    pointerEvents: 'none'
+  },
+  turnIndicatorBadgePulse: {
+    position: 'absolute',
+    top: '-4px',
+    left: '-4px',
+    right: '-4px',
+    bottom: '-4px',
+    borderRadius: '30px',
+    opacity: 0.5,
+    zIndex: 1,
+    animation: 'pulseRing 2s ease-in-out infinite'
+  },
+  turnIndicatorBadgePulse2: {
+    position: 'absolute',
+    top: '-8px',
+    left: '-8px',
+    right: '-8px',
+    bottom: '-8px',
+    borderRadius: '30px',
+    opacity: 0.2,
+    zIndex: 0,
+    animation: 'pulseRing 2s ease-in-out infinite 0.5s'
+  },
+  turnIndicatorSparkle: {
+    position: 'absolute',
+    width: '8px',
+    height: '8px',
+    background: 'radial-gradient(circle, rgba(255, 255, 255, 1) 0%, rgba(255, 255, 255, 0.3) 100%)',
+    borderRadius: '50%',
+    zIndex: 5,
+    boxShadow: '0 0 12px rgba(255, 255, 255, 1), 0 0 24px rgba(255, 255, 255, 0.6), 0 0 36px rgba(255, 255, 255, 0.3)',
+    animation: 'sparkle 2s ease-in-out infinite',
+    pointerEvents: 'none',
+    transform: 'translate(-50%, -50%)'
   },
   playerName: {
     fontSize: '14px',

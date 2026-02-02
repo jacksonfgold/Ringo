@@ -82,14 +82,28 @@ class RoomManager {
     }
 
     const normalizedName = (playerName || '').trim().toLowerCase()
+    const trimmedName = (playerName || '').trim()
+    
+    // First check if there's a player with the same socket ID (reconnecting)
+    const existingById = room.players.find(p => p.id === playerId)
+    if (existingById) {
+      // Update name if it changed
+      if (existingById.name !== trimmedName) {
+        existingById.name = trimmedName
+      }
+      existingById.disconnected = false
+      return { room, oldId: null }
+    }
+    
     // Check if player with this name already exists (case-insensitive)
     const existingPlayer = room.players.find(
       p => (p.name || '').trim().toLowerCase() === normalizedName
     )
     if (existingPlayer) {
-      // Update the player's socket ID
+      // Update the player's socket ID and name
       const oldId = existingPlayer.id
       existingPlayer.id = playerId
+      existingPlayer.name = trimmedName // Update name in case it changed
       existingPlayer.disconnected = false
       
       // If they were the host, update hostId
@@ -100,11 +114,6 @@ class RoomManager {
     }
     
     // If player doesn't exist, try to add them (might fail if room is full)
-    // But first check if there's a player with the same ID (shouldn't happen, but be safe)
-    if (room.players.find(p => p.id === playerId)) {
-      return { room, oldId: null } // Already in room with this ID
-    }
-    
     room.addPlayer(playerId, playerName)
     return { room, oldId: null }
   }

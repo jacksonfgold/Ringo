@@ -92,16 +92,16 @@ const getCardColor = (value) => {
 const styles = {
   container: {
     position: 'fixed',
-    top: '80px',
-    left: '50%',
-    transform: 'translateX(-50%)',
+    top: '16px',
+    right: '16px',
     zIndex: 200,
     display: 'flex',
     flexDirection: 'column',
     gap: '8px',
-    maxWidth: '90%',
-    width: '320px',
-    pointerEvents: 'none'
+    maxWidth: 'calc(100vw - 32px)',
+    width: 'min(320px, calc(100vw - 32px))',
+    pointerEvents: 'none',
+    alignItems: 'flex-end'
   },
   notification: {
     background: 'rgba(255, 255, 255, 0.95)',
@@ -113,7 +113,10 @@ const styles = {
     pointerEvents: 'auto',
     cursor: 'pointer',
     animation: 'slideIn 0.3s ease-out',
-    transition: 'opacity 0.2s'
+    transition: 'opacity 0.2s, transform 0.2s',
+    maxWidth: '100%',
+    minWidth: 'min(280px, calc(100vw - 32px))',
+    width: '100%'
   },
   ringoNotification: {
     background: 'linear-gradient(135deg, rgba(255, 107, 107, 0.95) 0%, rgba(238, 82, 83, 0.95) 100%)',
