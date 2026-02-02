@@ -461,6 +461,16 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
                         <span style={{ fontWeight: '600' }}>Master Bot</span>
                         <span style={styles.botDifficultyDesc}>Expert tactics</span>
                       </button>
+                      <button 
+                        onClick={() => handleAddBot('NIGHTMARE')}
+                        style={styles.botDifficultyButton}
+                        onMouseOver={(e) => e.currentTarget.style.background = 'rgba(102, 126, 234, 0.1)'}
+                        onMouseOut={(e) => e.currentTarget.style.background = 'none'}
+                      >
+                        <span style={styles.botDifficultyIcon}>💀</span>
+                        <span style={{ fontWeight: '600' }}>Nightmare Bot</span>
+                        <span style={styles.botDifficultyDesc}>MCTS + Belief Model</span>
+                      </button>
                     </div>
                   )}
                 </div>

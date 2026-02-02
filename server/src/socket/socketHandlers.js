@@ -104,7 +104,7 @@ async function executeBotTurn(io, room, roomCode, botId, difficulty) {
   
   if (turnPhase === 'WAITING_FOR_PLAY_OR_DRAW') {
     // Bot decides to play or draw
-    const decision = getBotDecision(room.gameState, botId, difficulty, { phase: 'turn' })
+    const decision = getBotDecision(room.gameState, botId, difficulty, { phase: 'turn', roomCode })
     
     if (decision && decision.action === 'play') {
       const result = handlePlay(room.gameState, botId, decision.indices, {})
@@ -193,7 +193,8 @@ async function executeBotDrawDecision(io, room, roomCode, botId, difficulty, dra
     phase: 'ringo',
     drawnCard,
     ringoPossible,
-    ringoInfo
+    ringoInfo,
+    roomCode
   })
   
   if (decision && decision.action === 'ringo' && ringoPossible) {
@@ -246,7 +247,8 @@ async function executeBotDrawDecision(io, room, roomCode, botId, difficulty, dra
     const bot = room.gameState.players.find(p => p.id === botId)
     const insertDecision = getBotDecision(room.gameState, botId, difficulty, {
       phase: 'insert',
-      drawnCard
+      drawnCard,
+      roomCode
     })
     
     const result = handleInsertCardWithTracking(room.gameState, botId, insertDecision?.position || 0)
@@ -292,7 +294,8 @@ async function executeBotCapture(io, room, roomCode, botId, difficulty) {
   const capturedCards = room.gameState.pendingCapture.cards
   const decision = getBotDecision(room.gameState, botId, difficulty, {
     phase: 'capture',
-    capturedCards
+    capturedCards,
+    roomCode
   })
   
   if (!decision || decision.action === 'discard_all') {
@@ -343,7 +346,8 @@ async function insertCapturedCardsSequentially(io, room, roomCode, botId, diffic
     const bot = room.gameState.players.find(p => p.id === botId)
     const insertDecision = getBotDecision(room.gameState, botId, difficulty, {
       phase: 'insert',
-      drawnCard: card
+      drawnCard: card,
+      roomCode
     })
     
     const result = handleCaptureDecision(

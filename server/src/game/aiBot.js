@@ -1,10 +1,19 @@
-// AI Bot implementation with 3 difficulty levels
+// AI Bot implementation with 4 difficulty levels
 import { randomUUID } from 'crypto'
+import {
+  nightmareModeDecision,
+  nightmareModeCapture,
+  nightmareModeInsert,
+  nightmareModeRingo
+} from './nightmareBot.js'
+import { validateCombo, validateBeat, findValidCombos } from './moveValidation.js'
+import { createDeck } from './cardModel.js'
 
 export const BotDifficulty = {
   EASY: 'EASY',
   MEDIUM: 'MEDIUM',
-  HARD: 'HARD'
+  HARD: 'HARD',
+  NIGHTMARE: 'NIGHTMARE'
 }
 
 // Create a bot player
@@ -12,7 +21,8 @@ export function createBot(difficulty, botNumber) {
   const difficultyNames = {
     [BotDifficulty.EASY]: 'Rookie',
     [BotDifficulty.MEDIUM]: 'Pro',
-    [BotDifficulty.HARD]: 'Master'
+    [BotDifficulty.HARD]: 'Master',
+    [BotDifficulty.NIGHTMARE]: 'Nightmare'
   }
   
   return {
@@ -28,7 +38,7 @@ export function createBot(difficulty, botNumber) {
 // ============ HAND ANALYSIS HELPERS ============
 
 // Find all adjacent groups of same value in hand
-function findAdjacentGroups(hand) {
+export function findAdjacentGroups(hand) {
   if (!hand || hand.length === 0) return []
   
   const groups = []
@@ -82,7 +92,7 @@ function getGroupValue(hand, indices) {
 }
 
 // Calculate "messiness" - how fragmented the hand is
-function calculateMessiness(hand) {
+export function calculateMessiness(hand) {
   if (!hand || hand.length === 0) return 0
   
   const groups = findAdjacentGroups(hand)
@@ -598,7 +608,23 @@ function hardModeRingo(gameState, botId, drawnCard, ringoPossible, ringoInfo) {
 // ============ MAIN DECISION ROUTER ============
 
 export function getBotDecision(gameState, botId, difficulty, context = {}) {
-  const { phase, drawnCard, ringoPossible, ringoInfo, capturedCards } = context
+  const { phase, drawnCard, ringoPossible, ringoInfo, capturedCards, roomCode } = context
+  
+  // Nightmare mode uses belief-MCTS
+  if (difficulty === BotDifficulty.NIGHTMARE) {
+    switch (phase) {
+      case 'turn':
+        return nightmareModeDecision(gameState, botId, roomCode || '')
+      case 'capture':
+        return nightmareModeCapture(gameState, botId, capturedCards, roomCode || '')
+      case 'insert':
+        return nightmareModeInsert(gameState, botId, drawnCard, roomCode || '')
+      case 'ringo':
+        return nightmareModeRingo(gameState, botId, drawnCard, ringoPossible, ringoInfo, roomCode || '')
+      default:
+        return null
+    }
+  }
   
   switch (phase) {
     case 'turn':
