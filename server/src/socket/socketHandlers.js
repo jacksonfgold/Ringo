@@ -726,13 +726,17 @@ export function setupSocketHandlers(io) {
         
         room.gameState = createGameState(room.players, previousWinner)
 
+        // Emit a signal to clear old game state before sending new one
+        io.to(room.code).emit('gameStateReset')
+
         // Broadcast game state to all players (only non-bots)
         room.players.forEach(player => {
           if (!player.isBot) {
             try {
               const publicState = buildPublicState(room, player.id)
               io.to(player.id).emit('gameStateUpdate', {
-                gameState: { ...publicState, roomCode: data.roomCode }
+                gameState: { ...publicState, roomCode: data.roomCode },
+                isNewGame: true // Flag to indicate this is a fresh game
               })
             } catch (error) {
               console.error(`Error sending game state to player ${player.id}:`, error)

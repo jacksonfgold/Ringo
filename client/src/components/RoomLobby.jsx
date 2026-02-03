@@ -278,13 +278,15 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
   const handleLeaveRoom = () => {
     if (roomCode) {
       socket.emit('leaveRoom', { roomCode })
-      if (clearSavedState) clearSavedState()
-      setRoomCode('')
-      setPlayers([])
-      setIsHost(false)
-      setShowNameInput(true)
-      setJoinCode('')
     }
+    // Always clear all state, even if no roomCode
+    if (clearSavedState) clearSavedState()
+    if (setGameStateProp) setGameStateProp(null)
+    setRoomCode('')
+    setPlayers([])
+    setIsHost(false)
+    setShowNameInput(true)
+    setJoinCode('')
   }
 
   // Prioritize roomPlayers (from useSocket/roomUpdate) as the source of truth

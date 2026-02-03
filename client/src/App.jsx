@@ -17,7 +17,9 @@ function App() {
 
   const handleGoHome = () => {
     setShowGame(false)
-    // Keep game state saved, just hide the game view
+    // Clear all game data when leaving
+    clearSavedState()
+    setGameState(null)
   }
 
   useEffect(() => {

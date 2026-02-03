@@ -64,8 +64,19 @@ export function useSocket() {
     if (!hasLoadedFromStorage.current) return
     
     if (gameState) {
-      console.log('[useSocket] Saving gameState to localStorage')
-      localStorage.setItem('ringo_gameState', JSON.stringify(gameState))
+      // Only save game state if it's actually in progress (not a stale state)
+      // Don't save GAME_OVER states as they'll be replaced by new games
+      if (gameState.status === 'PLAYING') {
+        console.log('[useSocket] Saving gameState to localStorage')
+        localStorage.setItem('ringo_gameState', JSON.stringify(gameState))
+      } else if (gameState.status === 'GAME_OVER') {
+        // Clear old game state when game ends - new game will start fresh
+        console.log('[useSocket] Game over - clearing saved game state')
+        localStorage.removeItem('ringo_gameState')
+      }
+    } else {
+      // If gameState is null, clear localStorage
+      localStorage.removeItem('ringo_gameState')
     }
   }, [gameState])
 
@@ -128,6 +139,13 @@ export function useSocket() {
       }
     })
 
+    newSocket.on('gameStateReset', () => {
+      console.log('[useSocket] Game state reset signal received - clearing old state')
+      // Clear game state and localStorage before new game starts
+      setGameState(null)
+      localStorage.removeItem('ringo_gameState')
+    })
+
     newSocket.on('gameStateUpdate', (data) => {
       console.log('[useSocket] Game state update received:', data)
       console.log('[useSocket] Current socket ID:', newSocket.id)
@@ -136,6 +154,14 @@ export function useSocket() {
         console.log('[useSocket] Current player index:', data.gameState.currentPlayerIndex)
         console.log('[useSocket] My player index:', data.gameState.players?.findIndex(p => p.id === newSocket.id))
         console.log('[useSocket] Is my turn?', data.gameState.currentPlayerIndex === data.gameState.players?.findIndex(p => p.id === newSocket.id))
+        
+        // If this is a new game (status is PLAYING and isNewGame flag is set), ensure clean state
+        if (data.isNewGame && data.gameState.status === 'PLAYING') {
+          console.log('[useSocket] New game detected - ensuring clean state')
+          // Clear any stale localStorage state
+          localStorage.removeItem('ringo_gameState')
+        }
+        
         setGameState(data.gameState)
         if (data.gameState.hostId) {
           setRoomHostId(data.gameState.hostId)
@@ -212,13 +238,20 @@ export function useSocket() {
   }, [connected, socket])
 
   const clearSavedState = () => {
+    // Clear all localStorage items
     localStorage.removeItem('ringo_roomCode')
     localStorage.removeItem('ringo_playerName')
     localStorage.removeItem('ringo_gameState')
+    
+    // Clear all state
     setRoomCode(null)
     setPlayerName(null)
     setGameState(null)
     setRoomClosedError(null)
+    setRoomPlayers([])
+    setRoomHostId(null)
+    
+    console.log('[useSocket] Cleared all saved state and game data')
   }
 
   return {
