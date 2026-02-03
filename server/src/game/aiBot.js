@@ -342,14 +342,31 @@ function mediumModeDecision(gameState, botId) {
       return { action: 'play', indices: validPlays[0].indices }
     }
     
-    // Find plays that reduce messiness most
+    // Find plays that reduce messiness most and unblock cards
     let bestPlay = null
     let bestScore = -Infinity
     
     for (const play of validPlays) {
       const testHand = hand.filter((_, i) => !play.indices.includes(i))
-      const messinessReduction = calculateMessiness(hand) - calculateMessiness(testHand)
-      const score = messinessReduction * 3 + play.size * 2 + play.value
+      const oldMessiness = calculateMessiness(hand)
+      const newMessiness = calculateMessiness(testHand)
+      const messinessReduction = oldMessiness - newMessiness
+      
+      // Check if this play unblocks cards (creates new adjacent groups)
+      const oldGroups = findAdjacentGroups(hand)
+      const newGroups = findAdjacentGroups(testHand)
+      // Bonus if we reduce number of groups or create larger groups
+      let unblockBonus = 0
+      if (newGroups.length < oldGroups.length) {
+        unblockBonus += 12 // Fewer groups = unblocked cards
+      }
+      const oldMaxSize = Math.max(...oldGroups.map(g => g.size), 0)
+      const newMaxSize = Math.max(...newGroups.map(g => g.size), 0)
+      if (newMaxSize > oldMaxSize) {
+        unblockBonus += 10 // Created a larger group
+      }
+      
+      const score = messinessReduction * 5 + unblockBonus + play.size * 2 + play.value
       
       if (score > bestScore) {
         bestScore = score
@@ -394,14 +411,32 @@ function mediumModeDecision(gameState, botId) {
     return { action: 'play', indices: validPlays[0].indices }
   }
   
-  // Otherwise, prefer plays that reduce messiness
+  // Otherwise, prefer plays that reduce messiness and unblock cards
   let bestPlay = null
   let bestScore = -Infinity
   
   for (const play of validPlays) {
     const testHand = hand.filter((_, i) => !play.indices.includes(i))
-    const messinessReduction = calculateMessiness(hand) - calculateMessiness(testHand)
-    const score = messinessReduction * 4 - play.size * 2 + play.value
+    const oldMessiness = calculateMessiness(hand)
+    const newMessiness = calculateMessiness(testHand)
+    const messinessReduction = oldMessiness - newMessiness
+    
+    // Check if this play unblocks cards (creates new adjacent groups)
+    const oldGroups = findAdjacentGroups(hand)
+    const newGroups = findAdjacentGroups(testHand)
+    // Bonus if we reduce number of groups (unblocked cards)
+    let unblockBonus = 0
+    if (newGroups.length < oldGroups.length) {
+      unblockBonus += 18 // Fewer groups = unblocked cards
+    }
+    // Bonus if we create a larger group
+    const oldMaxSize = Math.max(...oldGroups.map(g => g.size), 0)
+    const newMaxSize = Math.max(...newGroups.map(g => g.size), 0)
+    if (newMaxSize > oldMaxSize) {
+      unblockBonus += 15 // Created a larger group by unblocking
+    }
+    
+    const score = messinessReduction * 6 + unblockBonus - play.size * 2 + play.value
     
     if (score > bestScore) {
       bestScore = score
@@ -576,7 +611,24 @@ function hardModeDecision(gameState, botId) {
     
     // Score components
     const cardsShed = play.size
-    const messinessReduction = calculateMessiness(hand) - calculateMessiness(testHand)
+    const oldMessiness = calculateMessiness(hand)
+    const newMessiness = calculateMessiness(testHand)
+    const messinessReduction = oldMessiness - newMessiness
+    
+    // Check if this play unblocks cards (creates new adjacent groups)
+    const oldGroups = findAdjacentGroups(hand)
+    const newGroups = findAdjacentGroups(testHand)
+    // Bonus if we create larger groups or reduce group count significantly
+    let unblockBonus = 0
+    if (newGroups.length < oldGroups.length) {
+      unblockBonus += 20 // Reduced number of groups is good
+    }
+    const oldMaxGroupSize = Math.max(...oldGroups.map(g => g.size), 0)
+    const newMaxGroupSize = Math.max(...newGroups.map(g => g.size), 0)
+    if (newMaxGroupSize > oldMaxGroupSize) {
+      unblockBonus += 15 // Created a larger group
+    }
+    
     const tempoGain = opponentInDanger ? 15 : (minOpponentCards <= 5 ? 8 : 0) // Much higher priority
     const ammoSpent = play.size >= 3 ? play.size : 0
     
@@ -595,7 +647,7 @@ function hardModeDecision(gameState, botId) {
       defensiveBonus = 20 // Strong preference to beat
     }
     
-    const score = 6 * cardsShed + 4 * messinessReduction + tempoGain - 3 * ammoSpent + denialBonus + defensiveBonus
+    const score = 6 * cardsShed + 6 * messinessReduction + unblockBonus + tempoGain - 3 * ammoSpent + denialBonus + defensiveBonus
     
     // Add small randomness (5%)
     const randomFactor = (Math.random() - 0.5) * score * 0.05

@@ -355,12 +355,26 @@ function simulateForward(state, botId, action, roomCode, horizon = 6) {
     const bot = currentState.players.find(p => p.id === botId)
     
     if (action.type === 'play') {
-      // Remove cards from hand
+      // Remove cards from hand (make a copy first to avoid index issues)
+      const botHandCopy = [...bot.hand]
       const sortedIndices = [...action.indices].sort((a, b) => b - a)
-      sortedIndices.forEach(idx => bot.hand.splice(idx, 1))
+      const playedCards = []
+      
+      // Extract cards before removing
+      sortedIndices.forEach(idx => {
+        if (idx >= 0 && idx < botHandCopy.length) {
+          playedCards.push(botHandCopy[idx])
+        }
+      })
+      
+      // Remove cards from hand
+      sortedIndices.forEach(idx => {
+        if (idx >= 0 && idx < bot.hand.length) {
+          bot.hand.splice(idx, 1)
+        }
+      })
       
       // Update current combo
-      const playedCards = action.indices.map(i => bot.hand[i] || currentState.players.find(p => p.id === botId)?.hand?.[i])
       currentState.currentCombo = playedCards
     } else if (action.type === 'draw') {
       // Simplified: assume draw happens
@@ -504,30 +518,66 @@ export function nightmareModeDecision(gameState, botId, roomCode) {
   let bestAction = playCandidates[0] // Default to first play option
   let bestUtility = -Infinity
   
+  // Check if opponent is close to winning - if so, ALWAYS play if possible
+  const opponents = gameState.players.filter(p => p.id !== botId && p.hand)
+  const minOpponentCards = Math.min(...opponents.map(p => p.hand?.length || 99))
+  const opponentVeryClose = minOpponentCards <= 2
+  const opponentInDanger = minOpponentCards <= 4
+  
+  // EMERGENCY: If opponent is very close, play immediately with best available play
+  if (opponentVeryClose && playCandidates.length > 0) {
+    playCandidates.sort((a, b) => {
+      if (a.comboSize !== b.comboSize) return a.comboSize - b.comboSize // Prefer efficient
+      return a.comboValue - b.comboValue
+    })
+    return { action: 'play', indices: playCandidates[0].indices }
+  }
+  
+  // Evaluate each candidate with MCTS
+  let bestAction = playCandidates[0] // Default to first play option
+  let bestUtility = -Infinity
+  
   // Add heuristic bonus for playing vs drawing
   for (const candidate of candidates) {
     let simResult
     if (candidate.type === 'draw') {
-      // For draws, use a quick heuristic instead of full simulation
+      // For draws, use a very negative heuristic
       simResult = {
-        winProbability: 0.1, // Drawing is generally worse
-        avgTurnsToWin: 10,
-        loseSoonProbability: 0.2,
-        giveFinisherProbability: 0.1
+        winProbability: 0.05, // Drawing is much worse
+        avgTurnsToWin: 15,
+        loseSoonProbability: 0.4,
+        giveFinisherProbability: 0.2
       }
     } else {
       simResult = simulateForward(gameState, botId, candidate, roomCode, 6)
     }
     
-    // Heuristic bonus: playing is generally better than drawing
+    // Heuristic bonus: playing is MUCH better than drawing
     let playBonus = 0
     if (candidate.type === 'play') {
-      playBonus = 20 // Strong preference to play when possible
+      playBonus = 50 // Very strong preference to play when possible
       // Bonus for larger plays
-      playBonus += candidate.comboSize * 5
+      playBonus += candidate.comboSize * 8
       // Bonus for beating efficiently
       if (currentCombo && candidate.comboSize <= currentCombo.length) {
-        playBonus += 10 // Same size beat is efficient
+        playBonus += 15 // Same size beat is efficient
+      }
+      // Defensive bonus if opponent is close
+      if (opponentInDanger) {
+        playBonus += 30 // Extra bonus to prevent opponent from winning
+      }
+      
+      // Check if this play unblocks cards (creates new adjacent groups)
+      const testHand = hand.filter((_, i) => !candidate.indices.includes(i))
+      const oldGroups = findAdjacentGroups(hand)
+      const newGroups = findAdjacentGroups(testHand)
+      if (newGroups.length < oldGroups.length) {
+        playBonus += 25 // Unblocking bonus - creates fewer groups
+      }
+      const oldMaxSize = Math.max(...oldGroups.map(g => g.size), 0)
+      const newMaxSize = Math.max(...newGroups.map(g => g.size), 0)
+      if (newMaxSize > oldMaxSize) {
+        playBonus += 20 // Created a larger group by unblocking
       }
     }
     
@@ -544,58 +594,42 @@ export function nightmareModeDecision(gameState, botId, roomCode) {
     }
   }
   
-  // Strong preference: if we can play, prefer playing unless draw is clearly better
+  // CRITICAL: Only draw if play utility is extremely negative
+  // Otherwise, always prefer playing
   if (bestAction.type === 'draw' && playCandidates.length > 0) {
-    // Only draw if utility is significantly better (by at least 30 points)
-    const bestPlayUtility = bestUtility
-    const drawUtility = bestUtility
-    
-    // Recalculate draw utility properly
-    const drawSim = {
-      winProbability: 0.05,
-      avgTurnsToWin: 12,
-      loseSoonProbability: 0.3,
-      giveFinisherProbability: 0.15
-    }
-    const drawUtil = 
-      100 * drawSim.winProbability -
-      6 * drawSim.avgTurnsToWin -
-      120 * drawSim.loseSoonProbability -
-      80 * drawSim.giveFinisherProbability
-    
-    // Find best play utility
+    // Recalculate to find best play
     let bestPlayUtil = -Infinity
+    let bestPlay = playCandidates[0]
+    
     for (const play of playCandidates) {
       const sim = simulateForward(gameState, botId, play, roomCode, 6)
+      let playBonus = 50 + play.comboSize * 8
+      if (currentCombo && play.comboSize <= currentCombo.length) {
+        playBonus += 15
+      }
+      if (opponentInDanger) {
+        playBonus += 30
+      }
+      
       const util = 
         100 * sim.winProbability -
         6 * sim.avgTurnsToWin -
         120 * sim.loseSoonProbability -
         80 * sim.giveFinisherProbability +
-        20 + play.comboSize * 5
-      if (util > bestPlayUtil) bestPlayUtil = util
+        playBonus
+      
+      if (util > bestPlayUtil) {
+        bestPlayUtil = util
+        bestPlay = play
+      }
     }
     
-    // Only draw if it's significantly better
-    if (drawUtil > bestPlayUtil + 30) {
+    // Only draw if play utility is extremely bad (less than -100)
+    if (bestPlayUtil < -100) {
       return { action: 'draw' }
     } else {
-      // Prefer playing
-      bestAction = playCandidates[0]
-      // Find the actual best play
-      for (const play of playCandidates) {
-        const sim = simulateForward(gameState, botId, play, roomCode, 6)
-        const util = 
-          100 * sim.winProbability -
-          6 * sim.avgTurnsToWin -
-          120 * sim.loseSoonProbability -
-          80 * sim.giveFinisherProbability +
-          20 + play.comboSize * 5
-        if (util > bestUtility) {
-          bestUtility = util
-          bestAction = play
-        }
-      }
+      // Always prefer playing
+      return { action: 'play', indices: bestPlay.indices }
     }
   }
   
