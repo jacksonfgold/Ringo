@@ -7,6 +7,15 @@ class Room {
     this.players = []
     this.gameState = null
     this.createdAt = Date.now()
+    this.lastActivity = Date.now() // Track last activity for cleanup
+  }
+  
+  updateActivity() {
+    this.lastActivity = Date.now()
+  }
+  
+  isInactive(timeoutMs) {
+    return Date.now() - this.lastActivity > timeoutMs
   }
 
   addPlayer(playerId, playerName) {
@@ -137,6 +146,36 @@ class RoomManager {
         this.rooms.delete(code)
       }
     }
+  }
+  
+  cleanupInactiveRooms(inactivityTimeoutMs = 30 * 60 * 1000) { // Default: 30 minutes
+    const now = Date.now()
+    const roomsToClose = []
+    
+    for (const [code, room] of this.rooms.entries()) {
+      // Close room if:
+      // 1. Empty (no players)
+      // 2. Inactive for too long (no activity in timeout period)
+      // 3. All players are disconnected for more than 5 minutes
+      const allDisconnected = room.players.length > 0 && 
+        room.players.every(p => p.disconnected) &&
+        (now - room.lastActivity > 5 * 60 * 1000) // 5 minutes with all disconnected
+      
+      if (room.isEmpty() || room.isInactive(inactivityTimeoutMs) || allDisconnected) {
+        roomsToClose.push({ code, room })
+      }
+    }
+    
+    return roomsToClose
+  }
+  
+  closeRoom(code) {
+    const room = this.rooms.get(code)
+    if (room) {
+      this.rooms.delete(code)
+      return room
+    }
+    return null
   }
 }
 

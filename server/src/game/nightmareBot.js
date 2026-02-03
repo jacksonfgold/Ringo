@@ -258,7 +258,7 @@ export function findOptimalInsertion(hand, cards) {
 
 // ============ MCTS SIMULATION ============
 
-// Sample a plausible hidden world (opponent hands)
+// Sample a plausible hidden world (opponent hands) using belief model
 function sampleHiddenWorld(gameState, botId, roomCode) {
   const beliefs = beliefStates.get(roomCode)
   if (!beliefs) return gameState // No beliefs, return as-is
@@ -270,7 +270,7 @@ function sampleHiddenWorld(gameState, botId, roomCode) {
   const bot = gameState.players.find(p => p.id === botId)
   const botHand = bot?.hand || []
   
-  // Get all known cards (discard pile, current combo, bot's hand)
+  // Get all known cards (discard pile, current combo, bot's hand, all player hands)
   const knownCards = []
   if (gameState.discardPile) {
     knownCards.push(...gameState.discardPile.map(c => ({ ...c })))
@@ -279,6 +279,12 @@ function sampleHiddenWorld(gameState, botId, roomCode) {
     knownCards.push(...gameState.currentCombo.map(c => ({ ...c })))
   }
   knownCards.push(...botHand.map(c => ({ ...c })))
+  // Also track cards in other players' hands if visible (for bots)
+  gameState.players.forEach(p => {
+    if (p.id !== botId && p.hand) {
+      knownCards.push(...p.hand.map(c => ({ ...c })))
+    }
+  })
   
   // Create remaining deck
   const fullDeck = createDeck()
@@ -286,7 +292,7 @@ function sampleHiddenWorld(gameState, botId, roomCode) {
     !knownCards.some(known => known.id === card.id)
   )
   
-  // Shuffle and deal to opponents
+  // Shuffle and deal to opponents, biased by belief model
   for (let i = remainingDeck.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [remainingDeck[i], remainingDeck[j]] = [remainingDeck[j], remainingDeck[i]]
@@ -296,10 +302,46 @@ function sampleHiddenWorld(gameState, botId, roomCode) {
   sampledState.players.forEach(player => {
     if (player.id !== botId && !player.isBot) {
       const handSize = player.hand?.length || 0
+      const belief = beliefs.get(player.id)
+      
+      // Sample hand biased by belief model
       const sampledHand = []
-      for (let i = 0; i < handSize && deckIndex < remainingDeck.length; i++) {
+      const valueCounts = {} // Track how many of each value we've sampled
+      
+      // First pass: try to match belief model expectations
+      if (belief) {
+        for (let v = 1; v <= 8; v++) {
+          const expectedRange = belief.possibleCounts[v] || { min: 0, max: 3 }
+          const targetCount = Math.floor((expectedRange.min + expectedRange.max) / 2)
+          valueCounts[v] = 0
+          
+          // Try to sample cards of this value
+          for (let i = 0; i < targetCount && deckIndex < remainingDeck.length && sampledHand.length < handSize; i++) {
+            // Find a card with this value
+            const cardIndex = remainingDeck.findIndex((c, idx) => 
+              idx >= deckIndex && (c.value === v || (c.isSplit && c.splitValues.includes(v)))
+            )
+            if (cardIndex !== -1) {
+              const card = remainingDeck[cardIndex]
+              sampledHand.push(card)
+              remainingDeck.splice(cardIndex, 1)
+              valueCounts[v]++
+            }
+          }
+        }
+      }
+      
+      // Fill remaining slots randomly
+      while (sampledHand.length < handSize && deckIndex < remainingDeck.length) {
         sampledHand.push(remainingDeck[deckIndex++])
       }
+      
+      // Shuffle the sampled hand to randomize order
+      for (let i = sampledHand.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [sampledHand[i], sampledHand[j]] = [sampledHand[j], sampledHand[i]]
+      }
+      
       player.hand = sampledHand
     }
   })
@@ -357,7 +399,7 @@ function simulateForward(state, botId, action, roomCode, horizon = 6) {
   let giveFinisherCount = 0
   let avgTurnsToWin = 0
   
-  const numSamples = 16 // Reduced for performance (can increase if needed)
+  const numSamples = 32 // Increased for better prediction accuracy
   
   for (let sample = 0; sample < numSamples; sample++) {
     const sampledState = sampleHiddenWorld(state, botId, roomCode)
@@ -420,7 +462,7 @@ function simulateForward(state, botId, action, roomCode, horizon = 6) {
       const currentPlayer = currentState.players[currentState.currentPlayerIndex]
       
       if (currentPlayer.id === botId) {
-        // Bot's turn - use best response
+        // Bot's turn - use strategic play (not just largest combo)
         // Convert currentCombo array to format expected by validateBeat
         let currentComboForValidation = null
         if (currentState.currentCombo && currentState.currentCombo.length > 0) {
@@ -435,13 +477,35 @@ function simulateForward(state, botId, action, roomCode, horizon = 6) {
         }
         const botCombos = findValidCombos(bot.hand, currentComboForValidation)
         if (botCombos.length > 0) {
+          // Strategic play: prefer plays that unblock cards and reduce hand cost
           botCombos.sort((a, b) => {
+            // Test each play's effect on hand
+            const testHandA = bot.hand.filter((_, i) => !a.cardIndices.includes(i))
+            const testHandB = bot.hand.filter((_, i) => !b.cardIndices.includes(i))
+            const costA = calculateHandCost(testHandA)
+            const costB = calculateHandCost(testHandB)
+            
+            // Prefer lower cost (better hand shape)
+            if (costA !== costB) return costA - costB
+            
+            // If same cost, prefer efficient beats (same size or larger)
+            if (currentComboForValidation) {
+              const aEfficient = a.combo.size <= currentComboForValidation.size
+              const bEfficient = b.combo.size <= currentComboForValidation.size
+              if (aEfficient !== bEfficient) return aEfficient ? -1 : 1
+            }
+            
+            // Otherwise prefer larger plays
             if (a.combo.size !== b.combo.size) return b.combo.size - a.combo.size
             return b.combo.value - a.combo.value
           })
           const playIndices = botCombos[0].cardIndices
           const sortedIndices = [...playIndices].sort((a, b) => b - a)
+          const playedCards = sortedIndices.map(idx => bot.hand[idx]).filter(c => c)
           sortedIndices.forEach(idx => bot.hand.splice(idx, 1))
+          
+          // Update current combo
+          currentState.currentCombo = playedCards
           turns++
           
           if (bot.hand.length === 0) {
@@ -451,7 +515,14 @@ function simulateForward(state, botId, action, roomCode, horizon = 6) {
         } else {
           // Draw
           if (currentState.drawPile && currentState.drawPile.length > 0) {
-            bot.hand.push(currentState.drawPile.pop())
+            const drawn = currentState.drawPile.pop()
+            // Optimally insert the drawn card
+            const optimal = findOptimalInsertion(bot.hand, [drawn])
+            if (optimal.length > 0) {
+              bot.hand.splice(optimal[0].position, 0, drawn)
+            } else {
+              bot.hand.push(drawn)
+            }
           } else if (currentState.discardPile && currentState.discardPile.length > 0) {
             // Shuffle discard into draw for simulation (use proper shuffle)
             const shuffled = [...currentState.discardPile]
@@ -463,7 +534,13 @@ function simulateForward(state, botId, action, roomCode, horizon = 6) {
             currentState.drawPile = shuffled
             currentState.discardPile = []
             if (currentState.drawPile.length > 0) {
-              bot.hand.push(currentState.drawPile.pop())
+              const drawn = currentState.drawPile.pop()
+              const optimal = findOptimalInsertion(bot.hand, [drawn])
+              if (optimal.length > 0) {
+                bot.hand.splice(optimal[0].position, 0, drawn)
+              } else {
+                bot.hand.push(drawn)
+              }
             }
           }
         }
@@ -472,16 +549,32 @@ function simulateForward(state, botId, action, roomCode, horizon = 6) {
         const oppAction = simulateOpponentAction(currentState, currentPlayer.id)
         if (oppAction && oppAction.action === 'play') {
           const opp = currentState.players.find(p => p.id === currentPlayer.id)
-          if (!opp || !opp.hand) continue
+          if (!opp || !opp.hand) {
+            currentState.currentPlayerIndex = (currentState.currentPlayerIndex + 1) % currentState.players.length
+            continue
+          }
           const sortedIndices = [...oppAction.indices].sort((a, b) => b - a)
           // Validate indices before removing
           const validIndices = sortedIndices.filter(idx => idx >= 0 && idx < opp.hand.length)
+          const playedCards = validIndices.map(idx => opp.hand[idx]).filter(c => c)
           validIndices.forEach(idx => opp.hand.splice(idx, 1))
+          
+          // Update current combo
+          currentState.currentCombo = playedCards
           
           if (opp.hand.length === 0) {
             someoneElseWon = true
             if (ply <= 2) loseSoonCount++
             break
+          }
+        } else if (oppAction && oppAction.action === 'draw') {
+          // Opponent draws
+          if (currentState.drawPile && currentState.drawPile.length > 0) {
+            const drawn = currentState.drawPile.pop()
+            const opp = currentState.players.find(p => p.id === currentPlayer.id)
+            if (opp && opp.hand) {
+              opp.hand.push(drawn) // Simple append for opponents
+            }
           }
         }
       }
@@ -495,11 +588,27 @@ function simulateForward(state, botId, action, roomCode, horizon = 6) {
       avgTurnsToWin += turns
     }
     
-    // Check if action gives opponent a finisher
+    // Check if action gives opponent a finisher (they can win next turn)
     if (action.type === 'play' && currentState.currentCombo) {
-      const nextPlayer = currentState.players[(currentState.currentPlayerIndex + 1) % currentState.players.length]
+      const nextPlayerIndex = (currentState.currentPlayerIndex + 1) % currentState.players.length
+      const nextPlayer = currentState.players[nextPlayerIndex]
       if (nextPlayer && nextPlayer.hand && nextPlayer.hand.length <= 2) {
-        giveFinisherCount++
+        // Check if they can actually beat the combo
+        let currentComboForValidation = null
+        if (currentState.currentCombo && currentState.currentCombo.length > 0) {
+          const firstCard = currentState.currentCombo[0]
+          const comboValue = firstCard.resolvedValue !== undefined && firstCard.resolvedValue !== null
+            ? firstCard.resolvedValue
+            : (firstCard.isSplit ? Math.max(...firstCard.splitValues) : firstCard.value)
+          currentComboForValidation = {
+            size: currentState.currentCombo.length,
+            value: comboValue
+          }
+        }
+        const nextPlayerCombos = findValidCombos(nextPlayer.hand, currentComboForValidation)
+        if (nextPlayerCombos.length > 0) {
+          giveFinisherCount++
+        }
       }
     }
   }
@@ -545,14 +654,24 @@ export function nightmareModeDecision(gameState, botId, roomCode) {
       return { action: 'draw' }
     }
     
-    // Limit to top 12 by heuristic
+    // Limit to top 15 by heuristic, but prioritize strategic plays
     validCombos.sort((a, b) => {
+      // Test each combo's effect on hand
+      const testHandA = hand.filter((_, i) => !a.cardIndices.includes(i))
+      const testHandB = hand.filter((_, i) => !b.cardIndices.includes(i))
+      const costA = calculateHandCost(testHandA)
+      const costB = calculateHandCost(testHandB)
+      
+      // Prefer lower cost (better hand shape)
+      if (costA !== costB) return costA - costB
+      
+      // Otherwise prefer larger plays
       const aScore = a.combo.size * 10 + a.combo.value
       const bScore = b.combo.size * 10 + b.combo.value
       return bScore - aScore
     })
     
-    const topCombos = validCombos.slice(0, 12)
+    const topCombos = validCombos.slice(0, 15)
     topCombos.forEach(combo => {
       candidates.push({
         type: 'play',
@@ -617,16 +736,16 @@ export function nightmareModeDecision(gameState, botId, roomCode) {
     // Heuristic bonus: playing is generally better than drawing, but not always
     let playBonus = 0
     if (candidate.type === 'play') {
-      playBonus = 15 // Moderate preference to play when possible
-      // Bonus for larger plays
-      playBonus += candidate.comboSize * 5
+      playBonus = 20 // Moderate preference to play when possible
+      // Bonus for larger plays (sheds more cards)
+      playBonus += candidate.comboSize * 6
       // Bonus for beating efficiently
       if (currentComboForValidation && candidate.comboSize <= currentComboForValidation.size) {
-        playBonus += 10 // Same size beat is efficient
+        playBonus += 12 // Same size beat is efficient
       }
       // Defensive bonus if opponent is close
       if (opponentInDanger) {
-        playBonus += 20 // Extra bonus to prevent opponent from winning
+        playBonus += 25 // Extra bonus to prevent opponent from winning
       }
       
       // Check if this play unblocks cards (creates new adjacent groups)
@@ -634,20 +753,27 @@ export function nightmareModeDecision(gameState, botId, roomCode) {
       const oldGroups = findAdjacentGroups(hand)
       const newGroups = findAdjacentGroups(testHand)
       if (newGroups.length < oldGroups.length) {
-        playBonus += 15 // Unblocking bonus - creates fewer groups
+        playBonus += 18 // Unblocking bonus - creates fewer groups
       }
       const oldMaxSize = Math.max(...oldGroups.map(g => g.size), 0)
       const newMaxSize = Math.max(...newGroups.map(g => g.size), 0)
       if (newMaxSize > oldMaxSize) {
-        playBonus += 12 // Created a larger group by unblocking
+        playBonus += 15 // Created a larger group by unblocking
+      }
+      
+      // Bonus for reducing hand cost (better hand shape)
+      const oldCost = calculateHandCost(hand)
+      const newCost = calculateHandCost(testHand)
+      if (newCost < oldCost) {
+        playBonus += (oldCost - newCost) * 2 // Reward hand improvement
       }
     }
     
     const utility = 
-      100 * simResult.winProbability -
-      6 * simResult.avgTurnsToWin -
-      120 * simResult.loseSoonProbability -
-      80 * simResult.giveFinisherProbability +
+      120 * simResult.winProbability -
+      8 * simResult.avgTurnsToWin -
+      150 * simResult.loseSoonProbability -
+      100 * simResult.giveFinisherProbability +
       playBonus
     
     if (utility > bestUtility) {

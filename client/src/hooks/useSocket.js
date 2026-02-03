@@ -130,16 +130,27 @@ export function useSocket() {
     })
 
     newSocket.on('roomUpdate', (data) => {
-      console.log('Room update:', data)
+      console.log('[useSocket] Room update received:', data)
       if (data.roomCode) {
         setRoomCode(data.roomCode)
       }
-      if (data.players) {
+      // Always update players, even if empty array (to clear stale data)
+      if (data.players !== undefined) {
         setRoomPlayers(data.players)
+        console.log('[useSocket] Updated roomPlayers:', data.players.map(p => ({ id: p.id, name: p.name, isBot: p.isBot })))
       }
-      if (data.hostId) {
+      if (data.hostId !== undefined) {
         setRoomHostId(data.hostId)
       }
+    })
+
+    newSocket.on('roomClosed', (data) => {
+      console.log('[useSocket] Room closed event received:', data)
+      // Clear all room-related state
+      clearSavedState()
+      setRoomClosedError(data.reason || 'Room has been closed')
+      // Clear game state
+      setGameState(null)
     })
 
     newSocket.on('gameStateReset', () => {

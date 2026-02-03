@@ -112,6 +112,7 @@ async function executeBotTurn(io, room, roomCode, botId, difficulty) {
       if (result.success) {
         const previousStatus = room.gameState?.status
         room.gameState = result.state
+        room.updateActivity()
         
         const winsIncremented = incrementWinnerWins(room, previousStatus)
         if (winsIncremented) {
@@ -152,6 +153,7 @@ async function executeBotTurn(io, room, roomCode, botId, difficulty) {
       
       if (result.success) {
         room.gameState = result.state
+        room.updateActivity()
         
         // Notify about draw
         io.to(room.code).emit('playerNotification', {
@@ -210,6 +212,7 @@ async function executeBotDrawDecision(io, room, roomCode, botId, difficulty, dra
     if (result.success) {
       const previousStatus = room.gameState?.status
       room.gameState = result.state
+      room.updateActivity()
       
       const winsIncremented = incrementWinnerWins(room, previousStatus)
       if (winsIncremented) {
@@ -288,6 +291,7 @@ async function executeBotDrawDecision(io, room, roomCode, botId, difficulty, dra
     if (result.success) {
       const previousStatus = room.gameState?.status
       room.gameState = result.state
+      room.updateActivity()
       
       const winsIncremented = incrementWinnerWins(room, previousStatus)
       if (winsIncremented) {
@@ -336,6 +340,7 @@ async function executeBotCapture(io, room, roomCode, botId, difficulty) {
     if (result.success) {
       const previousStatus = room.gameState?.status
       room.gameState = result.state
+      room.updateActivity()
       
       const winsIncremented = incrementWinnerWins(room, previousStatus)
       if (winsIncremented) {
@@ -396,6 +401,7 @@ async function insertCapturedCardsSequentially(io, room, roomCode, botId, diffic
     if (result.success) {
       const previousStatus = room.gameState?.status
       room.gameState = result.state
+      room.updateActivity()
       
       const winsIncremented = incrementWinnerWins(room, previousStatus)
       if (winsIncremented) {
@@ -456,7 +462,40 @@ function checkRateLimit(socketId) {
   return true
 }
 
+// Room cleanup interval - runs every 5 minutes
+let roomCleanupInterval = null
+
 export function setupSocketHandlers(io) {
+  // Start periodic room cleanup
+  const INACTIVITY_TIMEOUT = 30 * 60 * 1000 // 30 minutes of inactivity
+  const CLEANUP_INTERVAL = 5 * 60 * 1000 // Check every 5 minutes
+  
+  roomCleanupInterval = setInterval(() => {
+    const roomsToClose = roomManager.cleanupInactiveRooms(INACTIVITY_TIMEOUT)
+    
+    for (const { code, room } of roomsToClose) {
+      console.log(`[Room Cleanup] Closing inactive room: ${code}`)
+      
+      // Notify all players in the room that it's being closed
+      io.to(code).emit('roomClosed', {
+        reason: room.isEmpty() 
+          ? 'Room is empty' 
+          : room.isInactive(INACTIVITY_TIMEOUT)
+          ? 'Room inactive for too long'
+          : 'All players disconnected',
+        roomCode: code
+      })
+      
+      // Close the room
+      roomManager.closeRoom(code)
+    }
+    
+    if (roomsToClose.length > 0) {
+      console.log(`[Room Cleanup] Closed ${roomsToClose.length} inactive room(s)`)
+    }
+  }, CLEANUP_INTERVAL)
+  
+  console.log('[Socket Handlers] Room cleanup started (checks every 5 minutes)')
   io.on('connection', (socket) => {
     console.log('Client connected:', socket.id)
 
@@ -467,6 +506,7 @@ export function setupSocketHandlers(io) {
 
       try {
         const room = roomManager.createRoom(socket.id, data.playerName || 'Player')
+        room.updateActivity()
         socket.join(room.code)
         callback({ 
           success: true, 
@@ -486,6 +526,7 @@ export function setupSocketHandlers(io) {
 
       try {
         const room = roomManager.joinRoom(data.roomCode, socket.id, data.playerName || 'Player')
+        room.updateActivity()
         socket.join(room.code)
         
         io.to(room.code).emit('roomUpdate', {
@@ -514,6 +555,7 @@ export function setupSocketHandlers(io) {
         const rejoinResult = roomManager.rejoinRoom(data.roomCode, socket.id, data.playerName || 'Player')
         const room = rejoinResult.room
         const previousPlayerId = rejoinResult.oldId
+        room.updateActivity()
         socket.join(room.code)
         
         // If game is in progress, update player ID and name in game state
@@ -589,6 +631,7 @@ export function setupSocketHandlers(io) {
       socket.leave(data.roomCode)
       
       if (room) {
+        room.updateActivity()
         io.to(data.roomCode).emit('roomUpdate', {
           players: room.players,
           roomCode: data.roomCode,
@@ -606,8 +649,13 @@ export function setupSocketHandlers(io) {
       try {
         const room = roomManager.getRoom(data.roomCode)
         if (!room) {
+          socket.emit('roomClosed', {
+            reason: 'Room no longer exists',
+            roomCode: data.roomCode
+          })
           return callback({ error: 'Room not found' })
         }
+        room.updateActivity()
 
         if (room.hostId !== socket.id) {
           return callback({ error: 'Only host can add bots' })
@@ -648,8 +696,13 @@ export function setupSocketHandlers(io) {
       try {
         const room = roomManager.getRoom(data.roomCode)
         if (!room) {
+          socket.emit('roomClosed', {
+            reason: 'Room no longer exists',
+            roomCode: data.roomCode
+          })
           return callback({ error: 'Room not found' })
         }
+        room.updateActivity()
 
         if (room.hostId !== socket.id) {
           return callback({ error: 'Only host can remove bots' })
@@ -687,8 +740,13 @@ export function setupSocketHandlers(io) {
       try {
         const room = roomManager.getRoom(data.roomCode)
         if (!room) {
+          socket.emit('roomClosed', {
+            reason: 'Room no longer exists',
+            roomCode: data.roomCode
+          })
           return callback({ error: 'Room not found' })
         }
+        room.updateActivity()
 
         if (room.hostId !== socket.id) {
           return callback({ error: 'Only host can rename bots' })
@@ -734,8 +792,13 @@ export function setupSocketHandlers(io) {
       try {
         const room = roomManager.getRoom(data.roomCode)
         if (!room) {
+          socket.emit('roomClosed', {
+            reason: 'Room no longer exists',
+            roomCode: data.roomCode
+          })
           return callback({ error: 'Room not found' })
         }
+        room.updateActivity()
 
         if (room.hostId !== socket.id) {
           return callback({ error: 'Only host can start the game' })
@@ -760,9 +823,17 @@ export function setupSocketHandlers(io) {
         }
         
         room.gameState = createGameState(room.players, previousWinner)
+        room.updateActivity()
 
         // Emit a signal to clear old game state before sending new one
         io.to(room.code).emit('gameStateReset')
+        
+        // Emit roomUpdate to refresh lobby with latest player data (including wins)
+        io.to(room.code).emit('roomUpdate', {
+          players: room.players,
+          roomCode: room.code,
+          hostId: room.hostId
+        })
 
         // Broadcast game state to all players (only non-bots)
         room.players.forEach(player => {
@@ -795,9 +866,17 @@ export function setupSocketHandlers(io) {
       }
 
       const room = roomManager.getRoom(data.roomCode)
-      if (!room || !room.gameState) {
-        return callback({ error: 'Room or game not found' })
+      if (!room) {
+        socket.emit('roomClosed', {
+          reason: 'Room no longer exists',
+          roomCode: data.roomCode
+        })
+        return callback({ error: 'Room not found' })
       }
+      if (!room.gameState) {
+        return callback({ error: 'Game not found' })
+      }
+      room.updateActivity()
 
       const result = handlePlay(
         room.gameState,
@@ -847,9 +926,17 @@ export function setupSocketHandlers(io) {
       }
 
       const room = roomManager.getRoom(data.roomCode)
-      if (!room || !room.gameState) {
-        return callback({ error: 'Room or game not found' })
+      if (!room) {
+        socket.emit('roomClosed', {
+          reason: 'Room no longer exists',
+          roomCode: data.roomCode
+        })
+        return callback({ error: 'Room not found' })
       }
+      if (!room.gameState) {
+        return callback({ error: 'Game not found' })
+      }
+      room.updateActivity()
 
       const result = handleDrawWithTracking(room.gameState, socket.id)
 
@@ -858,6 +945,7 @@ export function setupSocketHandlers(io) {
       }
 
       room.gameState = result.state
+      room.updateActivity()
 
       const player = room.players.find(p => p.id === socket.id)
       const playerName = player?.name || 'Player'
@@ -895,9 +983,17 @@ export function setupSocketHandlers(io) {
       }
 
       const room = roomManager.getRoom(data.roomCode)
-      if (!room || !room.gameState) {
-        return callback({ error: 'Room or game not found' })
+      if (!room) {
+        socket.emit('roomClosed', {
+          reason: 'Room no longer exists',
+          roomCode: data.roomCode
+        })
+        return callback({ error: 'Room not found' })
       }
+      if (!room.gameState) {
+        return callback({ error: 'Game not found' })
+      }
+      room.updateActivity()
 
       const result = handleRINGOWithTracking(
         room.gameState,
@@ -949,9 +1045,17 @@ export function setupSocketHandlers(io) {
       }
 
       const room = roomManager.getRoom(data.roomCode)
-      if (!room || !room.gameState) {
-        return callback({ error: 'Room or game not found' })
+      if (!room) {
+        socket.emit('roomClosed', {
+          reason: 'Room no longer exists',
+          roomCode: data.roomCode
+        })
+        return callback({ error: 'Room not found' })
       }
+      if (!room.gameState) {
+        return callback({ error: 'Game not found' })
+      }
+      room.updateActivity()
 
       const result = handleInsertCardWithTracking(room.gameState, socket.id, data.insertPosition)
 
@@ -960,6 +1064,7 @@ export function setupSocketHandlers(io) {
       }
 
       room.gameState = result.state
+      room.updateActivity()
 
       const player = room.players.find(p => p.id === socket.id)
       const playerName = player?.name || 'Player'
@@ -1008,9 +1113,17 @@ export function setupSocketHandlers(io) {
       }
 
       const room = roomManager.getRoom(data.roomCode)
-      if (!room || !room.gameState) {
-        return callback({ error: 'Room or game not found' })
+      if (!room) {
+        socket.emit('roomClosed', {
+          reason: 'Room no longer exists',
+          roomCode: data.roomCode
+        })
+        return callback({ error: 'Room not found' })
       }
+      if (!room.gameState) {
+        return callback({ error: 'Game not found' })
+      }
+      room.updateActivity()
 
       const result = handleDiscardDrawnCardWithTracking(room.gameState, socket.id)
 
@@ -1019,6 +1132,7 @@ export function setupSocketHandlers(io) {
       }
 
       room.gameState = result.state
+      room.updateActivity()
 
       const player = room.players.find(p => p.id === socket.id)
       const playerName = player?.name || 'Player'
@@ -1065,9 +1179,17 @@ export function setupSocketHandlers(io) {
       }
 
       const room = roomManager.getRoom(data.roomCode)
-      if (!room || !room.gameState) {
-        return callback({ error: 'Room or game not found' })
+      if (!room) {
+        socket.emit('roomClosed', {
+          reason: 'Room no longer exists',
+          roomCode: data.roomCode
+        })
+        return callback({ error: 'Room not found' })
       }
+      if (!room.gameState) {
+        return callback({ error: 'Game not found' })
+      }
+      room.updateActivity()
 
       // Get captured card info BEFORE processing (since it will be removed from state)
       const allCapturedCardsBefore = room.gameState.pendingCapture?.cards || []
@@ -1088,6 +1210,7 @@ export function setupSocketHandlers(io) {
       }
 
       room.gameState = result.state
+      room.updateActivity()
 
       const player = room.players.find(p => p.id === socket.id)
       const playerName = player?.name || 'Player'
