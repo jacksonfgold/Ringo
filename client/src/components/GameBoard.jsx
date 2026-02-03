@@ -1428,14 +1428,14 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
 const styles = {
   container: {
     minHeight: '100vh',
-    height: '100vh', // Fix height to viewport
     padding: '16px',
     display: 'flex',
     flexDirection: 'column',
     position: 'relative',
-    overflowY: 'auto',
+    overflowY: 'visible', // Allow natural scrolling
     WebkitOverflowScrolling: 'touch', // Smooth scrolling on iOS
     transition: 'background 0.5s ease',
+    width: '100%',
   },
   desktopContainer: {
     padding: '16px 0', // Remove horizontal padding on desktop to allow ads

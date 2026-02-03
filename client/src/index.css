@@ -14,12 +14,16 @@ body {
   min-height: 100vh;
   color: #333;
   overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 #root {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 button {
@@ -75,9 +79,10 @@ input:focus {
 
 /* Ensure full height on mobile */
 html, body, #root {
-  height: 100%;
+  min-height: 100%;
   width: 100%;
-  overscroll-behavior-y: none; /* Prevent pull-to-refresh on mobile */
+  overscroll-behavior-y: auto; /* Allow scrolling */
+  -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
 }
 
 /* Prevent text selection on cards during gameplay */
