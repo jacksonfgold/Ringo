@@ -614,19 +614,19 @@ export function nightmareModeDecision(gameState, botId, roomCode) {
       simResult = simulateForward(gameState, botId, candidate, roomCode, 6)
     }
     
-    // Heuristic bonus: playing is MUCH better than drawing
+    // Heuristic bonus: playing is generally better than drawing, but not always
     let playBonus = 0
     if (candidate.type === 'play') {
-      playBonus = 50 // Very strong preference to play when possible
+      playBonus = 15 // Moderate preference to play when possible
       // Bonus for larger plays
-      playBonus += candidate.comboSize * 8
+      playBonus += candidate.comboSize * 5
       // Bonus for beating efficiently
       if (currentComboForValidation && candidate.comboSize <= currentComboForValidation.size) {
-        playBonus += 15 // Same size beat is efficient
+        playBonus += 10 // Same size beat is efficient
       }
       // Defensive bonus if opponent is close
       if (opponentInDanger) {
-        playBonus += 30 // Extra bonus to prevent opponent from winning
+        playBonus += 20 // Extra bonus to prevent opponent from winning
       }
       
       // Check if this play unblocks cards (creates new adjacent groups)
@@ -634,12 +634,12 @@ export function nightmareModeDecision(gameState, botId, roomCode) {
       const oldGroups = findAdjacentGroups(hand)
       const newGroups = findAdjacentGroups(testHand)
       if (newGroups.length < oldGroups.length) {
-        playBonus += 25 // Unblocking bonus - creates fewer groups
+        playBonus += 15 // Unblocking bonus - creates fewer groups
       }
       const oldMaxSize = Math.max(...oldGroups.map(g => g.size), 0)
       const newMaxSize = Math.max(...newGroups.map(g => g.size), 0)
       if (newMaxSize > oldMaxSize) {
-        playBonus += 20 // Created a larger group by unblocking
+        playBonus += 12 // Created a larger group by unblocking
       }
     }
     
@@ -656,8 +656,8 @@ export function nightmareModeDecision(gameState, botId, roomCode) {
     }
   }
   
-  // CRITICAL: Only draw if play utility is extremely negative
-  // Otherwise, always prefer playing
+  // If simulation suggests drawing, check if we should still play
+  // Only override if play utility is significantly better
   if (bestAction.type === 'draw' && playCandidates.length > 0) {
     // Recalculate to find best play
     let bestPlayUtil = -Infinity
@@ -665,12 +665,12 @@ export function nightmareModeDecision(gameState, botId, roomCode) {
     
     for (const play of playCandidates) {
       const sim = simulateForward(gameState, botId, play, roomCode, 6)
-      let playBonus = 50 + play.comboSize * 8
+      let playBonus = 15 + play.comboSize * 5
       if (currentComboForValidation && play.comboSize <= currentComboForValidation.size) {
-        playBonus += 15
+        playBonus += 10
       }
       if (opponentInDanger) {
-        playBonus += 30
+        playBonus += 20
       }
       
       const util = 
@@ -686,13 +686,13 @@ export function nightmareModeDecision(gameState, botId, roomCode) {
       }
     }
     
-    // Only draw if play utility is extremely bad (less than -100)
-    if (bestPlayUtil < -100) {
-      return { action: 'draw' }
-    } else {
-      // Always prefer playing
+    // Only play if it's significantly better than drawing (margin of 20 points)
+    // This allows strategic draws when the hand needs reshaping
+    if (bestPlayUtil > bestUtility + 20) {
       return { action: 'play', indices: bestPlay.indices }
     }
+    // Otherwise, trust the simulation and draw
+    return { action: 'draw' }
   }
   
   if (bestAction.type === 'play') {
