@@ -86,9 +86,19 @@ export function validateCombo(hand, cardIndices, splitResolutions = {}, autoReso
 
   const cards = cardIndices.map(idx => {
     // Reconstruct Card object to ensure methods exist
+    if (idx < 0 || idx >= hand.length) {
+      return null // Will be caught by filter below
+    }
     const cardData = hand[idx]
+    if (!cardData) {
+      return null
+    }
     return createCardFromData(cardData)
-  })
+  }).filter(card => card !== null)
+  
+  if (cards.length !== cardIndices.length) {
+    return { valid: false, reason: 'Invalid card indices' }
+  }
   
   // Auto-resolve split cards if needed
   let finalResolutions = splitResolutions

@@ -32,7 +32,11 @@ export function handlePlay(state, playerId, cardIndices, splitResolutions = {}) 
 
   // Auto-resolve split cards
   const autoSplitResolutions = { ...splitResolutions }
-  const cards = cardIndices.map(idx => player.hand[idx])
+  // Validate indices are within bounds (validatePlayMove will catch invalid indices, but this prevents undefined access)
+  const cards = cardIndices.map(idx => player.hand[idx]).filter(card => card !== undefined)
+  if (cards.length !== cardIndices.length) {
+    return { success: false, error: 'Invalid card indices', state }
+  }
   let targetValue = null
   
   // First pass: find a non-split card value or use provided resolutions

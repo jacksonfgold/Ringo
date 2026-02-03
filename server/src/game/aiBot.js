@@ -295,9 +295,23 @@ function easyModeCapture(gameState, botId, capturedCards) {
 
 function easyModeInsert(gameState, botId, card) {
   const bot = gameState.players.find(p => p.id === botId)
+  if (!bot || !bot.hand) return { action: 'discard' }
+  
+  // Check if card matches anything in hand
+  const cardValues = card.isSplit ? card.splitValues : [card.value]
+  const hasMatch = bot.hand.some(handCard => {
+    const handValues = handCard.isSplit ? handCard.splitValues : [handCard.value]
+    return cardValues.some(v => handValues.includes(v))
+  })
+  
+  // If no match, discard it
+  if (!hasMatch) {
+    return { action: 'discard' }
+  }
+  
   // Insert randomly or at end
   const pos = Math.random() < 0.5 ? bot.hand.length : Math.floor(Math.random() * (bot.hand.length + 1))
-  return { position: pos }
+  return { action: 'insert', position: pos }
 }
 
 function easyModeRingo(gameState, botId, drawnCard, ringoPossible) {
@@ -497,8 +511,55 @@ function mediumModeCapture(gameState, botId, capturedCards) {
 
 function mediumModeInsert(gameState, botId, card) {
   const bot = gameState.players.find(p => p.id === botId)
-  const pos = findBestInsertPosition(bot.hand, card, BotDifficulty.MEDIUM)
-  return { position: pos }
+  if (!bot || !bot.hand) return { action: 'discard' }
+  
+  // Check if card matches anything in hand or can bridge cards
+  const cardValues = card.isSplit ? card.splitValues : [card.value]
+  let hasMatch = false
+  let bestScore = -Infinity
+  let bestPos = bot.hand.length
+  
+  for (let pos = 0; pos <= bot.hand.length; pos++) {
+    let score = 0
+    
+    // Check adjacency with neighbors
+    if (pos > 0) {
+      const leftCard = bot.hand[pos - 1]
+      const leftValues = leftCard.isSplit ? leftCard.splitValues : [leftCard.value]
+      if (cardValues.some(v => leftValues.includes(v))) {
+        score += 10 // Can form group with left neighbor
+        hasMatch = true
+      }
+    }
+    
+    if (pos < bot.hand.length) {
+      const rightCard = bot.hand[pos]
+      const rightValues = rightCard.isSplit ? rightCard.splitValues : [rightCard.value]
+      if (cardValues.some(v => rightValues.includes(v))) {
+        score += 10 // Can form group with right neighbor
+        hasMatch = true
+      }
+    }
+    
+    // Check if it bridges two same-value cards
+    const testHand = [...bot.hand]
+    testHand.splice(pos, 0, card)
+    const newMessiness = calculateMessiness(testHand)
+    const oldMessiness = calculateMessiness(bot.hand)
+    score += (oldMessiness - newMessiness) * 5
+    
+    if (score > bestScore) {
+      bestScore = score
+      bestPos = pos
+    }
+  }
+  
+  // If no match and no messiness reduction, discard
+  if (!hasMatch && bestScore <= 0) {
+    return { action: 'discard' }
+  }
+  
+  return { action: 'insert', position: bestPos }
 }
 
 function mediumModeRingo(gameState, botId, drawnCard, ringoPossible) {
@@ -731,13 +792,33 @@ function hardModeCapture(gameState, botId, capturedCards) {
 
 function hardModeInsert(gameState, botId, card) {
   const bot = gameState.players.find(p => p.id === botId)
-  if (!bot) return { position: 0 }
+  if (!bot || !bot.hand) return { action: 'discard' }
   
-  // Find position that minimizes turns to empty
-  let bestPos = 0
+  // Check if card matches anything or reduces messiness significantly
+  const cardValues = card.isSplit ? card.splitValues : [card.value]
+  let hasMatch = false
+  let bestPos = bot.hand.length
   let bestTurns = Infinity
+  const originalTurns = estimateTurnsToEmpty(bot.hand)
   
   for (let pos = 0; pos <= bot.hand.length; pos++) {
+    // Check if matches neighbors
+    if (pos > 0) {
+      const leftCard = bot.hand[pos - 1]
+      const leftValues = leftCard.isSplit ? leftCard.splitValues : [leftCard.value]
+      if (cardValues.some(v => leftValues.includes(v))) {
+        hasMatch = true
+      }
+    }
+    
+    if (pos < bot.hand.length) {
+      const rightCard = bot.hand[pos]
+      const rightValues = rightCard.isSplit ? rightCard.splitValues : [rightCard.value]
+      if (cardValues.some(v => rightValues.includes(v))) {
+        hasMatch = true
+      }
+    }
+    
     const testHand = [...bot.hand]
     testHand.splice(pos, 0, card)
     const turns = estimateTurnsToEmpty(testHand)
@@ -748,7 +829,12 @@ function hardModeInsert(gameState, botId, card) {
     }
   }
   
-  return { position: bestPos }
+  // Discard if no match AND it doesn't improve turns to empty
+  if (!hasMatch && bestTurns >= originalTurns) {
+    return { action: 'discard' }
+  }
+  
+  return { action: 'insert', position: bestPos }
 }
 
 function hardModeRingo(gameState, botId, drawnCard, ringoPossible, ringoInfo) {

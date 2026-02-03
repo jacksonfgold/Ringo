@@ -243,13 +243,45 @@ async function executeBotDrawDecision(io, room, roomCode, botId, difficulty, dra
       }
     }
   } else {
-    // Insert the card
+    // Insert or discard the card
     const bot = room.gameState.players.find(p => p.id === botId)
     const insertDecision = getBotDecision(room.gameState, botId, difficulty, {
       phase: 'insert',
       drawnCard,
       roomCode
     })
+    
+    // Check if bot wants to discard instead of insert
+    if (insertDecision?.action === 'discard') {
+      const result = handleDiscardDrawnCardWithTracking(room.gameState, botId)
+      
+      if (result.success) {
+        const previousStatus = room.gameState?.status
+        room.gameState = result.state
+        
+        const winsIncremented = incrementWinnerWins(room, previousStatus)
+        if (winsIncremented) {
+          io.to(room.code).emit('roomUpdate', {
+            players: room.players,
+            roomCode: room.code,
+            hostId: room.hostId
+          })
+        }
+        
+        room.players.forEach(player => {
+          const publicState = getPublicGameState(room.gameState, player.id)
+          if (publicState) {
+            io.to(player.id).emit('gameStateUpdate', { gameState: publicState })
+          }
+        })
+        
+        // Continue bot turns if needed
+        if (room.gameState.status === GameStatus.PLAYING) {
+          processBotTurn(io, room, roomCode)
+        }
+      }
+      return
+    }
     
     const result = handleInsertCardWithTracking(room.gameState, botId, insertDecision?.position || 0)
     
@@ -350,10 +382,13 @@ async function insertCapturedCardsSequentially(io, room, roomCode, botId, diffic
       roomCode
     })
     
+    // For capture, check if bot wants to discard this card
+    const captureAction = insertDecision?.action === 'discard' ? 'discard_all' : 'insert_one'
+    
     const result = handleCaptureDecision(
       room.gameState,
       botId,
-      'insert_one',
+      captureAction,
       insertDecision?.position || 0,
       card.id
     )

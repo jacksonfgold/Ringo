@@ -312,7 +312,19 @@ function simulateOpponentAction(state, playerId) {
   const player = state.players.find(p => p.id === playerId)
   if (!player || !player.hand) return null
   
-  const validCombos = findValidCombos(player.hand, state.currentCombo)
+  // Convert currentCombo array to format expected by validateBeat
+  let currentComboForValidation = null
+  if (state.currentCombo && state.currentCombo.length > 0) {
+    const firstCard = state.currentCombo[0]
+    const comboValue = firstCard.resolvedValue !== undefined && firstCard.resolvedValue !== null
+      ? firstCard.resolvedValue
+      : (firstCard.isSplit ? Math.max(...firstCard.splitValues) : firstCard.value)
+    currentComboForValidation = {
+      size: state.currentCombo.length,
+      value: comboValue
+    }
+  }
+  const validCombos = findValidCombos(player.hand, currentComboForValidation)
   
   if (!state.currentCombo || state.currentCombo.length === 0) {
     // Empty table - play largest group
@@ -378,9 +390,24 @@ function simulateForward(state, botId, action, roomCode, horizon = 6) {
       currentState.currentCombo = playedCards
     } else if (action.type === 'draw') {
       // Simplified: assume draw happens
+      // Try to shuffle discard into draw if needed
       if (currentState.drawPile && currentState.drawPile.length > 0) {
         const drawn = currentState.drawPile.pop()
         bot.hand.push(drawn)
+      } else if (currentState.discardPile && currentState.discardPile.length > 0) {
+        // Shuffle discard into draw for simulation (use proper shuffle)
+        const shuffled = [...currentState.discardPile]
+        // Fisher-Yates shuffle
+        for (let i = shuffled.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+        }
+        currentState.drawPile = shuffled
+        currentState.discardPile = []
+        if (currentState.drawPile.length > 0) {
+          const drawn = currentState.drawPile.pop()
+          bot.hand.push(drawn)
+        }
       }
     }
     
@@ -394,7 +421,19 @@ function simulateForward(state, botId, action, roomCode, horizon = 6) {
       
       if (currentPlayer.id === botId) {
         // Bot's turn - use best response
-        const botCombos = findValidCombos(bot.hand, currentState.currentCombo)
+        // Convert currentCombo array to format expected by validateBeat
+        let currentComboForValidation = null
+        if (currentState.currentCombo && currentState.currentCombo.length > 0) {
+          const firstCard = currentState.currentCombo[0]
+          const comboValue = firstCard.resolvedValue !== undefined && firstCard.resolvedValue !== null
+            ? firstCard.resolvedValue
+            : (firstCard.isSplit ? Math.max(...firstCard.splitValues) : firstCard.value)
+          currentComboForValidation = {
+            size: currentState.currentCombo.length,
+            value: comboValue
+          }
+        }
+        const botCombos = findValidCombos(bot.hand, currentComboForValidation)
         if (botCombos.length > 0) {
           botCombos.sort((a, b) => {
             if (a.combo.size !== b.combo.size) return b.combo.size - a.combo.size
@@ -413,6 +452,19 @@ function simulateForward(state, botId, action, roomCode, horizon = 6) {
           // Draw
           if (currentState.drawPile && currentState.drawPile.length > 0) {
             bot.hand.push(currentState.drawPile.pop())
+          } else if (currentState.discardPile && currentState.discardPile.length > 0) {
+            // Shuffle discard into draw for simulation (use proper shuffle)
+            const shuffled = [...currentState.discardPile]
+            // Fisher-Yates shuffle
+            for (let i = shuffled.length - 1; i > 0; i--) {
+              const j = Math.floor(Math.random() * (i + 1));
+              [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+            }
+            currentState.drawPile = shuffled
+            currentState.discardPile = []
+            if (currentState.drawPile.length > 0) {
+              bot.hand.push(currentState.drawPile.pop())
+            }
           }
         }
       } else {
@@ -420,8 +472,11 @@ function simulateForward(state, botId, action, roomCode, horizon = 6) {
         const oppAction = simulateOpponentAction(currentState, currentPlayer.id)
         if (oppAction && oppAction.action === 'play') {
           const opp = currentState.players.find(p => p.id === currentPlayer.id)
+          if (!opp || !opp.hand) continue
           const sortedIndices = [...oppAction.indices].sort((a, b) => b - a)
-          sortedIndices.forEach(idx => opp.hand.splice(idx, 1))
+          // Validate indices before removing
+          const validIndices = sortedIndices.filter(idx => idx >= 0 && idx < opp.hand.length)
+          validIndices.forEach(idx => opp.hand.splice(idx, 1))
           
           if (opp.hand.length === 0) {
             someoneElseWon = true
@@ -467,13 +522,24 @@ export function nightmareModeDecision(gameState, botId, roomCode) {
   initBeliefState(roomCode, gameState.players)
   
   const hand = bot.hand
-  const currentCombo = gameState.currentCombo
-  const validCombos = findValidCombos(hand, currentCombo)
+  // Convert currentCombo array to format expected by validateBeat
+  let currentComboForValidation = null
+  if (gameState.currentCombo && gameState.currentCombo.length > 0) {
+    const firstCard = gameState.currentCombo[0]
+    const comboValue = firstCard.resolvedValue !== undefined && firstCard.resolvedValue !== null
+      ? firstCard.resolvedValue
+      : (firstCard.isSplit ? Math.max(...firstCard.splitValues) : firstCard.value)
+    currentComboForValidation = {
+      size: gameState.currentCombo.length,
+      value: comboValue
+    }
+  }
+  const validCombos = findValidCombos(hand, currentComboForValidation)
   
   // Generate candidate actions
   const candidates = []
   
-  if (!currentCombo || currentCombo.length === 0) {
+  if (!gameState.currentCombo || gameState.currentCombo.length === 0) {
     // Empty table - all playable groups
     if (validCombos.length === 0) {
       return { action: 'draw' }
@@ -685,15 +751,44 @@ export function nightmareModeCapture(gameState, botId, capturedCards, roomCode) 
 
 export function nightmareModeInsert(gameState, botId, card, roomCode) {
   const bot = gameState.players.find(p => p.id === botId)
-  if (!bot) return { position: 0 }
+  if (!bot || !bot.hand) return { action: 'discard' }
   
+  // Calculate hand cost before and after insertion
+  const originalCost = calculateHandCost(bot.hand)
   const optimal = findOptimalInsertion(bot.hand, [card])
+  
   if (optimal.length > 0) {
-    return { position: optimal[0].position }
+    const testHand = [...bot.hand]
+    testHand.splice(optimal[0].position, 0, card)
+    const newCost = calculateHandCost(testHand)
+    
+    // Check if card matches anything in hand
+    const cardValues = card.isSplit ? card.splitValues : [card.value]
+    const hasMatch = bot.hand.some(handCard => {
+      const handValues = handCard.isSplit ? handCard.splitValues : [handCard.value]
+      return cardValues.some(v => handValues.includes(v))
+    })
+    
+    // Discard if no match AND it increases hand cost (makes hand worse)
+    if (!hasMatch && newCost >= originalCost) {
+      return { action: 'discard' }
+    }
+    
+    return { action: 'insert', position: optimal[0].position }
   }
   
-  // Fallback
-  return { position: bot.hand.length }
+  // Fallback: check if matches anything
+  const cardValues = card.isSplit ? card.splitValues : [card.value]
+  const hasMatch = bot.hand.some(handCard => {
+    const handValues = handCard.isSplit ? handCard.splitValues : [handCard.value]
+    return cardValues.some(v => handValues.includes(v))
+  })
+  
+  if (!hasMatch) {
+    return { action: 'discard' }
+  }
+  
+  return { action: 'insert', position: bot.hand.length }
 }
 
 export function nightmareModeRingo(gameState, botId, drawnCard, ringoPossible, ringoInfo, roomCode) {
