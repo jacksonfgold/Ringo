@@ -721,7 +721,10 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
           )}
 
           <button
-            onClick={onGoHome}
+            onClick={() => {
+              // Just hide the game view, don't clear room data
+              if (onGoHome) onGoHome()
+            }}
             style={styles.gameOverButton}
           >
             Return to Lobby

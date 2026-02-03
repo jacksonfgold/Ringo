@@ -70,15 +70,18 @@ export function useSocket() {
         console.log('[useSocket] Saving gameState to localStorage')
         localStorage.setItem('ringo_gameState', JSON.stringify(gameState))
       } else if (gameState.status === 'GAME_OVER') {
-        // Clear old game state when game ends - new game will start fresh
-        console.log('[useSocket] Game over - clearing saved game state')
-        localStorage.removeItem('ringo_gameState')
+        // Don't clear localStorage on GAME_OVER - keep it so lobby can show winner
+        // Only clear when a new game starts (handled by gameStateReset)
+        console.log('[useSocket] Game over - keeping gameState for lobby display')
       }
     } else {
-      // If gameState is null, clear localStorage
-      localStorage.removeItem('ringo_gameState')
+      // Only clear localStorage if we're actually leaving the room
+      // Don't clear just because gameState is temporarily null
+      if (!roomCode) {
+        localStorage.removeItem('ringo_gameState')
+      }
     }
-  }, [gameState])
+  }, [gameState, roomCode])
 
   useEffect(() => {
     const serverUrl = import.meta.env.VITE_SERVER_URL || 'http://localhost:3001'

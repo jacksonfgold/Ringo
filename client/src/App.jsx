@@ -12,14 +12,18 @@ function App() {
     // Show game while playing or if game just ended
     if (gameState?.status === 'PLAYING' || gameState?.status === 'GAME_OVER') {
       setShowGame(true)
+    } else {
+      // Hide game when status is not PLAYING or GAME_OVER
+      // But don't clear room data - user should stay in lobby
+      setShowGame(false)
     }
   }, [gameState])
 
   const handleGoHome = () => {
     setShowGame(false)
-    // Clear all game data when leaving
-    clearSavedState()
-    setGameState(null)
+    // Don't clear room data - just hide the game view
+    // Only clear gameState if we're actually leaving the room
+    // The gameState will be cleared when a new game starts or when leaving room
   }
 
   useEffect(() => {

@@ -240,6 +240,11 @@ function easyModeDecision(gameState, botId) {
   // Find valid plays
   const validPlays = findValidPlays(hand, currentCombo)
   
+  // Check if opponent is very close to winning (≤2 cards) - even easy mode should try to prevent this
+  const opponents = gameState.players.filter(p => p.id !== botId && p.hand)
+  const minOpponentCards = Math.min(...opponents.map(p => p.hand?.length || 99))
+  const opponentVeryClose = minOpponentCards <= 2
+  
   if (!currentCombo || currentCombo.length === 0) {
     // Table is empty - play largest group, tie-break by highest value
     if (validPlays.length === 0) return { action: 'draw' }
@@ -252,11 +257,21 @@ function easyModeDecision(gameState, botId) {
     return { action: 'play', indices: validPlays[0].indices }
   }
   
-  // Table has combo - try to beat with smallest number of cards, lowest value
+  // Table has combo - ALWAYS beat if opponent is very close to winning
   if (validPlays.length === 0) {
     return { action: 'draw' }
   }
   
+  // If opponent is very close, beat immediately
+  if (opponentVeryClose) {
+    validPlays.sort((a, b) => {
+      if (a.size !== b.size) return a.size - b.size
+      return a.value - b.value
+    })
+    return { action: 'play', indices: validPlays[0].indices }
+  }
+  
+  // Otherwise, try to beat with smallest number of cards, lowest value
   validPlays.sort((a, b) => {
     if (a.size !== b.size) return a.size - b.size
     return a.value - b.value
@@ -266,7 +281,15 @@ function easyModeDecision(gameState, botId) {
 }
 
 function easyModeCapture(gameState, botId, capturedCards) {
-  // Easy mode always discards
+  const bot = gameState.players.find(p => p.id === botId)
+  if (!bot || !bot.hand) return { action: 'discard_all' }
+  
+  // Easy mode: only take doubles (they're too valuable to pass up)
+  if (capturedCards.some(c => c.isSplit)) {
+    return { action: 'insert_all' }
+  }
+  
+  // Otherwise always discard (keep it simple but not completely dumb)
   return { action: 'discard_all' }
 }
 
@@ -295,14 +318,29 @@ function mediumModeDecision(gameState, botId) {
   const currentCombo = gameState.currentCombo
   const validPlays = findValidPlays(hand, currentCombo)
   
-  // Check if any opponent is in danger (≤2 cards)
-  const opponentInDanger = gameState.players.some(p => 
-    p.id !== botId && p.hand && p.hand.length <= 2
-  )
+  // Check if any opponent is close to winning (≤4 cards is dangerous)
+  const opponents = gameState.players.filter(p => p.id !== botId && p.hand)
+  const opponentCards = opponents.map(p => p.hand?.length || 99)
+  const minOpponentCards = Math.min(...opponentCards)
+  const opponentInDanger = minOpponentCards <= 4
+  const opponentVeryClose = minOpponentCards <= 2
+  const nextPlayerIndex = (gameState.currentPlayerIndex + 1) % gameState.players.length
+  const nextPlayer = gameState.players[nextPlayerIndex]
+  const nextPlayerCards = nextPlayer?.hand?.length || 99
   
   if (!currentCombo || currentCombo.length === 0) {
     // Table is empty - use smart lead selection
     if (validPlays.length === 0) return { action: 'draw' }
+    
+    // If opponent is very close, lead with something hard to beat
+    if (opponentVeryClose) {
+      validPlays.sort((a, b) => {
+        const aScore = a.size * 15 + a.value
+        const bScore = b.size * 15 + b.value
+        return bScore - aScore
+      })
+      return { action: 'play', indices: validPlays[0].indices }
+    }
     
     // Find plays that reduce messiness most
     let bestPlay = null
@@ -322,14 +360,37 @@ function mediumModeDecision(gameState, botId) {
     return { action: 'play', indices: bestPlay?.indices || validPlays[0].indices }
   }
   
-  // Table has combo
+  // Table has combo - ALWAYS beat if opponent is close to winning
   if (validPlays.length === 0) {
     return { action: 'draw' }
   }
   
-  // If opponent in danger, beat if possible
+  // CRITICAL: If opponent is very close (≤2 cards), beat immediately with any play
+  if (opponentVeryClose) {
+    // Prefer efficient beats but will use anything
+    validPlays.sort((a, b) => {
+      if (a.size !== b.size) return a.size - b.size
+      return a.value - b.value
+    })
+    return { action: 'play', indices: validPlays[0].indices }
+  }
+  
+  // If opponent in danger (≤4 cards), prioritize beating
   if (opponentInDanger) {
-    validPlays.sort((a, b) => a.size - b.size || a.value - b.value)
+    // Prefer efficient beats
+    validPlays.sort((a, b) => {
+      if (a.size !== b.size) return a.size - b.size
+      return a.value - b.value
+    })
+    return { action: 'play', indices: validPlays[0].indices }
+  }
+  
+  // If next player is close, prefer larger plays to force them to draw
+  if (nextPlayerCards <= 3) {
+    validPlays.sort((a, b) => {
+      if (b.size !== a.size) return b.size - a.size
+      return a.value - b.value
+    })
     return { action: 'play', indices: validPlays[0].indices }
   }
   
@@ -355,23 +416,45 @@ function mediumModeCapture(gameState, botId, capturedCards) {
   const bot = gameState.players.find(p => p.id === botId)
   if (!bot || !bot.hand) return { action: 'discard_all' }
   
-  // Check if any captured card helps
+  // Check if opponent is close to winning - if so, be more selective
+  const opponents = gameState.players.filter(p => p.id !== botId && p.hand)
+  const minOpponentCards = Math.min(...opponents.map(p => p.hand?.length || 99))
+  const opponentClose = minOpponentCards <= 3
+  
+  // Always take doubles (they're too valuable)
+  if (capturedCards.some(c => c.isSplit)) {
+    return { action: 'insert_all' }
+  }
+  
+  // Be more selective - only take if it creates/extends a group of 3+
+  let takeScore = 0
+  let wouldCreateTriple = false
+  
   for (const card of capturedCards) {
     const cardValues = card.isSplit ? card.splitValues : [card.value]
     
-    // Always take doubles
-    if (card.isSplit) {
-      return { action: 'insert_all' }
-    }
-    
-    // Check if it helps complete a group
-    for (let i = 0; i < bot.hand.length; i++) {
-      const handCard = bot.hand[i]
-      const handValues = handCard.isSplit ? handCard.splitValues : [handCard.value]
-      if (cardValues.some(v => handValues.includes(v))) {
-        return { action: 'insert_all' }
+    // Check if it would create a triple or larger group
+    for (const value of cardValues) {
+      const matchingCards = bot.hand.filter(c => {
+        const values = c.isSplit ? c.splitValues : [c.value]
+        return values.includes(value)
+      }).length
+      
+      if (matchingCards >= 2) {
+        wouldCreateTriple = true
+        takeScore += 10 // Triples are very valuable
+      } else if (matchingCards === 1) {
+        takeScore += 3 // Would create a pair
       }
     }
+  }
+  
+  // Penalty for taking cards (adds to hand size)
+  const takePenalty = capturedCards.length * (opponentClose ? 4 : 3)
+  
+  // Only take if it significantly helps (creates triple, or good value)
+  if (wouldCreateTriple || takeScore > takePenalty) {
+    return { action: 'insert_all' }
   }
   
   return { action: 'discard_all' }
@@ -426,10 +509,11 @@ function hardModeDecision(gameState, botId) {
   const currentCombo = gameState.currentCombo
   const validPlays = findValidPlays(hand, currentCombo)
   
-  // Check opponents
+  // Check opponents - be more aggressive about defensive play
   const opponents = gameState.players.filter(p => p.id !== botId && p.hand)
   const minOpponentCards = Math.min(...opponents.map(p => p.hand?.length || 99))
-  const opponentInDanger = minOpponentCards <= 3
+  const opponentInDanger = minOpponentCards <= 4
+  const opponentVeryClose = minOpponentCards <= 2
   const nextPlayerIndex = (gameState.currentPlayerIndex + 1) % gameState.players.length
   const nextPlayer = gameState.players[nextPlayerIndex]
   const nextPlayerCards = nextPlayer?.hand?.length || 99
@@ -469,9 +553,19 @@ function hardModeDecision(gameState, botId) {
     return { action: 'play', indices: validPlays[0].indices }
   }
   
-  // Table has combo - evaluate options with scoring
+  // Table has combo - CRITICAL: Always beat if opponent is very close
   if (validPlays.length === 0) {
     return { action: 'draw' }
+  }
+  
+  // EMERGENCY: If opponent is very close (≤2 cards), beat immediately with ANY play
+  if (opponentVeryClose) {
+    // Use most efficient beat available
+    validPlays.sort((a, b) => {
+      if (a.size !== b.size) return a.size - b.size
+      return a.value - b.value
+    })
+    return { action: 'play', indices: validPlays[0].indices }
   }
   
   let bestPlay = null
@@ -483,20 +577,28 @@ function hardModeDecision(gameState, botId) {
     // Score components
     const cardsShed = play.size
     const messinessReduction = calculateMessiness(hand) - calculateMessiness(testHand)
-    const tempoGain = opponentInDanger ? 5 : 0
+    const tempoGain = opponentInDanger ? 15 : (minOpponentCards <= 5 ? 8 : 0) // Much higher priority
     const ammoSpent = play.size >= 3 ? play.size : 0
     
     // Denial: if next player has few cards, prefer plays that force them to draw
     let denialBonus = 0
-    if (nextPlayerCards <= 2) {
+    if (nextPlayerCards <= 3) {
       // Prefer larger combos that opponent likely can't match
-      denialBonus = play.size * 3
+      denialBonus = play.size * 5
+      // Extra bonus if it's a triple or larger
+      if (play.size >= 3) denialBonus += 10
     }
     
-    const score = 6 * cardsShed + 4 * messinessReduction + 5 * tempoGain - 3 * ammoSpent + denialBonus
+    // Defensive bonus: if we can prevent opponent from winning
+    let defensiveBonus = 0
+    if (opponentInDanger) {
+      defensiveBonus = 20 // Strong preference to beat
+    }
+    
+    const score = 6 * cardsShed + 4 * messinessReduction + tempoGain - 3 * ammoSpent + denialBonus + defensiveBonus
     
     // Add small randomness (5%)
-    const randomFactor = (Math.random() - 0.5) * score * 0.1
+    const randomFactor = (Math.random() - 0.5) * score * 0.05
     
     if (score + randomFactor > bestScore) {
       bestScore = score + randomFactor
@@ -521,37 +623,54 @@ function hardModeCapture(gameState, botId, capturedCards) {
   const bot = gameState.players.find(p => p.id === botId)
   if (!bot || !bot.hand) return { action: 'discard_all' }
   
-  // Always take doubles
+  // Check if opponent is close to winning - be very selective
+  const opponents = gameState.players.filter(p => p.id !== botId && p.hand)
+  const minOpponentCards = Math.min(...opponents.map(p => p.hand?.length || 99))
+  const opponentClose = minOpponentCards <= 4
+  
+  // Always take doubles (they're too valuable)
   if (capturedCards.some(c => c.isSplit)) {
     return { action: 'insert_all' }
   }
   
-  // Check if taking reduces turns to empty
+  // Be very selective - only take if it creates a triple or significantly improves hand
   let takeScore = 0
+  let wouldCreateTriple = false
+  let wouldCreateLargeGroup = false
   
   for (const card of capturedCards) {
     const cardValues = card.isSplit ? card.splitValues : [card.value]
     
-    // Check if it extends a group
-    for (let i = 0; i < bot.hand.length; i++) {
-      const handCard = bot.hand[i]
-      const handValues = handCard.isSplit ? handCard.splitValues : [handCard.value]
-      if (cardValues.some(v => handValues.includes(v))) {
-        takeScore += 3
-        break
+    // Check if it would create a triple or larger group
+    for (const value of cardValues) {
+      const matchingCards = bot.hand.filter(c => {
+        const values = c.isSplit ? c.splitValues : [c.value]
+        return values.includes(value)
+      }).length
+      
+      if (matchingCards >= 2) {
+        wouldCreateTriple = true
+        takeScore += 15 // Triples are extremely valuable
+        if (matchingCards >= 3) {
+          wouldCreateLargeGroup = true
+          takeScore += 10 // Even larger groups
+        }
+      } else if (matchingCards === 1) {
+        takeScore += 2 // Would create a pair (less valuable)
       }
     }
     
-    // High cards late game (hand ≤5)
+    // High cards late game (hand ≤5) are more valuable
     if (bot.hand.length <= 5 && Math.max(...cardValues) >= 7) {
-      takeScore += 2
+      takeScore += 3
     }
   }
   
-  // Taking adds cards to hand (penalty)
-  const takePenalty = capturedCards.length * 2
+  // Higher penalty when opponent is close (don't want to add cards)
+  const takePenalty = capturedCards.length * (opponentClose ? 5 : 3)
   
-  if (takeScore > takePenalty) {
+  // Only take if it creates a triple, or significantly helps
+  if (wouldCreateTriple || wouldCreateLargeGroup || takeScore > takePenalty + 5) {
     return { action: 'insert_all' }
   }
   
