@@ -514,10 +514,6 @@ export function nightmareModeDecision(gameState, botId, roomCode) {
     return { action: 'draw' }
   }
   
-  // Evaluate each candidate with MCTS
-  let bestAction = playCandidates[0] // Default to first play option
-  let bestUtility = -Infinity
-  
   // Check if opponent is close to winning - if so, ALWAYS play if possible
   const opponents = gameState.players.filter(p => p.id !== botId && p.hand)
   const minOpponentCards = Math.min(...opponents.map(p => p.hand?.length || 99))
