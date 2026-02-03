@@ -621,7 +621,7 @@ export function nightmareModeDecision(gameState, botId, roomCode) {
       // Bonus for larger plays
       playBonus += candidate.comboSize * 8
       // Bonus for beating efficiently
-      if (currentCombo && candidate.comboSize <= currentCombo.length) {
+      if (currentComboForValidation && candidate.comboSize <= currentComboForValidation.size) {
         playBonus += 15 // Same size beat is efficient
       }
       // Defensive bonus if opponent is close
@@ -666,7 +666,7 @@ export function nightmareModeDecision(gameState, botId, roomCode) {
     for (const play of playCandidates) {
       const sim = simulateForward(gameState, botId, play, roomCode, 6)
       let playBonus = 50 + play.comboSize * 8
-      if (currentCombo && play.comboSize <= currentCombo.length) {
+      if (currentComboForValidation && play.comboSize <= currentComboForValidation.size) {
         playBonus += 15
       }
       if (opponentInDanger) {
