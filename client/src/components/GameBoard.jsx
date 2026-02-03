@@ -658,9 +658,15 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
       try {
         const duration = 3000
         const end = Date.now() + duration
+        let animationFrameId = null
 
         const frame = () => {
           try {
+            // Only continue if gameState is still GAME_OVER
+            if (gameState?.status !== 'GAME_OVER') {
+              return
+            }
+            
             confetti({
               particleCount: 2,
               angle: 60,
@@ -679,11 +685,18 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
             console.error('Confetti error:', e)
           }
 
-          if (Date.now() < end) {
-            requestAnimationFrame(frame)
+          if (Date.now() < end && gameState?.status === 'GAME_OVER') {
+            animationFrameId = requestAnimationFrame(frame)
           }
         }
-        frame()
+        animationFrameId = requestAnimationFrame(frame)
+        
+        // Cleanup function to stop confetti if component unmounts or gameState changes
+        return () => {
+          if (animationFrameId) {
+            cancelAnimationFrame(animationFrameId)
+          }
+        }
       } catch (e) {
         console.error('Confetti setup error:', e)
       }

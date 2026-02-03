@@ -6,6 +6,13 @@ class Room {
     this.hostId = hostId
     this.players = []
     this.gameState = null
+    this.settings = {
+      handSize: null,
+      turnTimer: 0,
+      autoStart: false,
+      allowRINGO: true,
+      spectatorMode: false
+    }
     this.createdAt = Date.now()
     this.lastActivity = Date.now() // Track last activity for cleanup
   }

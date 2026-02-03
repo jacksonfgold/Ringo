@@ -277,6 +277,7 @@ export function useSocket() {
     roomHostId,
     playerName,
     roomClosedError,
+    setRoomClosedError,
     setRoomCode,
     setPlayerName,
     setGameState,

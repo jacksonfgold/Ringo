@@ -4,7 +4,7 @@ import RoomLobby from './components/RoomLobby'
 import GameBoard from './components/GameBoard'
 
 function App() {
-  const { socket, connected, gameState, roomPlayers, roomCode, roomHostId, setRoomCode, setPlayerName, clearSavedState, setGameState, roomClosedError } = useSocket()
+  const { socket, connected, gameState, roomPlayers, roomCode, roomHostId, setRoomCode, setPlayerName, clearSavedState, setGameState, roomClosedError, setRoomClosedError } = useSocket()
   const [connectionTimeout, setConnectionTimeout] = useState(false)
   const [showGame, setShowGame] = useState(false)
 
@@ -21,9 +21,8 @@ function App() {
 
   const handleGoHome = () => {
     setShowGame(false)
-    // Don't clear room data - just hide the game view
-    // Only clear gameState if we're actually leaving the room
-    // The gameState will be cleared when a new game starts or when leaving room
+    // Clear gameState when returning to lobby so the winning screen doesn't persist
+    setGameState(null)
   }
 
   useEffect(() => {
@@ -78,7 +77,7 @@ function App() {
     return <GameBoard socket={socket} gameState={gameState} roomCode={roomCode} roomPlayers={roomPlayers} onGoHome={handleGoHome} />
   }
 
-  return <RoomLobby socket={socket} gameState={gameState} roomCode={roomCode} roomPlayers={roomPlayers} roomHostId={roomHostId} setRoomCode={setRoomCode} setPlayerName={setPlayerName} clearSavedState={clearSavedState} setGameState={setGameState} roomClosedError={roomClosedError} />
+  return <RoomLobby socket={socket} gameState={gameState} roomCode={roomCode} roomPlayers={roomPlayers} roomHostId={roomHostId} setRoomCode={setRoomCode} setPlayerName={setPlayerName} clearSavedState={clearSavedState} setGameState={setGameState} roomClosedError={roomClosedError} setRoomClosedError={setRoomClosedError} />
 }
 
 export default App

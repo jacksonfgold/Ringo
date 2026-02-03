@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react'
+import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 
-export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHostId = null, roomCode: initialRoomCode, setRoomCode: setRoomCodeProp, setPlayerName: setPlayerNameProp, clearSavedState, setGameState: setGameStateProp, roomClosedError }) {
+export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHostId = null, roomCode: initialRoomCode, setRoomCode: setRoomCodeProp, setPlayerName: setPlayerNameProp, clearSavedState, setGameState: setGameStateProp, roomClosedError, setRoomClosedError }) {
   const [roomCode, setRoomCode] = useState(initialRoomCode || '')
   const [joinCode, setJoinCode] = useState('')
   const [players, setPlayers] = useState([])
@@ -14,10 +17,26 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
   const [showNameInput, setShowNameInput] = useState(true)
   const [showRules, setShowRules] = useState(false)
   const [showBotMenu, setShowBotMenu] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
   const [editingBotId, setEditingBotId] = useState(null)
   const [editingBotName, setEditingBotName] = useState('')
+  const [gameSettings, setGameSettings] = useState({
+    handSize: null, // null = auto (10 for 2-3 players, 8 for 4-5)
+    turnTimer: 0, // 0 = no timer, seconds
+    autoStart: false,
+    allowRINGO: true,
+    spectatorMode: false
+  })
 
   const [copyFeedback, setCopyFeedback] = useState(false)
+  
+  // Drag and drop sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  )
 
   const handleCopyCode = async () => {
     if (!roomCode) return
@@ -61,6 +80,13 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
       if (data.hostId !== undefined) {
         setHostId(data.hostId)
         setIsHost(socket.id === data.hostId)
+      }
+    })
+
+    socket.on('roomSettingsUpdate', (data) => {
+      console.log('[RoomLobby] roomSettingsUpdate received:', data)
+      if (data.settings) {
+        setGameSettings(data.settings)
       }
     })
 
@@ -253,7 +279,7 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
   const handleStartGame = () => {
     if (!roomCode) return
 
-    socket.emit('startGame', { roomCode }, (response) => {
+    socket.emit('startGame', { roomCode, settings: gameSettings }, (response) => {
       if (!response.success) {
         alert(response.error || 'Failed to start game')
         console.error('Start game error:', response)
@@ -261,6 +287,142 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
         console.log('Game started successfully')
       }
     })
+  }
+  
+  const handleDragEnd = (event) => {
+    const { active, over } = event
+    
+    if (!over || active.id === over.id) return
+    if (!isHostEffective || gameState?.status === 'PLAYING') return
+    
+    const oldIndex = uniquePlayers.findIndex(p => p.id === active.id)
+    const newIndex = uniquePlayers.findIndex(p => p.id === over.id)
+    
+    if (oldIndex === -1 || newIndex === -1) return
+    
+    const newOrder = arrayMove(uniquePlayers, oldIndex, newIndex)
+    
+    // Emit reorder event to server
+    socket.emit('reorderPlayers', { 
+      roomCode, 
+      playerOrder: newOrder.map(p => p.id) 
+    }, (response) => {
+      if (!response.success) {
+        console.error('Failed to reorder players:', response.error)
+      }
+    })
+  }
+  
+  const handleUpdateSettings = (newSettings) => {
+    const updated = { ...gameSettings, ...newSettings }
+    setGameSettings(updated)
+    
+    if (isHostEffective) {
+      socket.emit('updateRoomSettings', { 
+        roomCode, 
+        settings: updated 
+      }, (response) => {
+        if (!response.success) {
+          console.error('Failed to update settings:', response.error)
+        }
+      })
+    }
+  }
+  
+  // Sortable player item component
+  const SortablePlayerItem = ({ player, index }) => {
+    const {
+      attributes,
+      listeners,
+      setNodeRef,
+      transform,
+      transition,
+      isDragging
+    } = useSortable({ id: player.id })
+    
+    const style = {
+      transform: CSS.Transform.toString(transform),
+      transition,
+      opacity: isDragging ? 0.5 : 1,
+      cursor: isHostEffective && gameState?.status !== 'PLAYING' ? 'grab' : 'default'
+    }
+    
+    const winsFromRoom = roomPlayers?.find(p => p.id === player.id || p.name === player.name)?.wins
+    const displayWins = winsFromRoom ?? player.wins ?? 0
+    const isBot = player.isBot
+    const isEditing = editingBotId === player.id
+    
+    return (
+      <div 
+        ref={setNodeRef} 
+        style={{
+          ...styles.playerItem,
+          ...(isBot ? styles.botPlayerItem : {}),
+          ...style
+        }}
+        {...attributes}
+      >
+        {isHostEffective && gameState?.status !== 'PLAYING' && (
+          <div style={styles.dragHandle} {...listeners}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="9" cy="12" r="1"/>
+              <circle cx="9" cy="5" r="1"/>
+              <circle cx="9" cy="19" r="1"/>
+              <circle cx="15" cy="12" r="1"/>
+              <circle cx="15" cy="5" r="1"/>
+              <circle cx="15" cy="19" r="1"/>
+            </svg>
+          </div>
+        )}
+        {isEditing ? (
+          <div style={styles.botNameEditContainer}>
+            <span>🤖 </span>
+            <input
+              type="text"
+              value={editingBotName}
+              onChange={(e) => setEditingBotName(e.target.value)}
+              onKeyDown={handleBotNameKeyDown}
+              onBlur={handleSaveBotName}
+              style={styles.botNameInput}
+              autoFocus
+              maxLength={20}
+            />
+          </div>
+        ) : (
+          <span 
+            style={{
+              ...styles.playerName,
+              ...(isBot && isHostEffective && gameState?.status !== 'PLAYING' ? styles.editableBotName : {})
+            }}
+            onClick={() => {
+              if (isBot && isHostEffective && gameState?.status !== 'PLAYING') {
+                handleStartEditBot(player)
+              }
+            }}
+            title={isBot && isHostEffective && gameState?.status !== 'PLAYING' ? 'Click to rename' : ''}
+          >
+            {isBot && '🤖 '}
+            {player.name} {player.id === socket?.id ? '(You)' : ''}
+            {player.id === effectiveHostId && ' 👑'}
+            {isBot && isHostEffective && gameState?.status !== 'PLAYING' && (
+              <span style={styles.editIcon}>✏️</span>
+            )}
+          </span>
+        )}
+        <div style={styles.playerRightSection}>
+          <span style={styles.playerWins}>{displayWins} wins</span>
+          {isBot && isHostEffective && gameState?.status !== 'PLAYING' && (
+            <button 
+              onClick={() => handleRemoveBot(player.id)}
+              style={styles.removeBotButton}
+              title="Remove bot"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      </div>
+    )
   }
 
   const handleAddBot = (difficulty) => {
@@ -396,68 +558,28 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
             </div>
 
             <div style={styles.playersSection}>
-              <h2 style={styles.sectionTitle}>Players ({(uniquePlayers.length || 0)}/5)</h2>
-              <div style={styles.playersList}>
-                {uniquePlayers.map((player, index) => {
-                  const winsFromRoom = roomPlayers?.find(p => p.id === player.id || p.name === player.name)?.wins
-                  const displayWins = winsFromRoom ?? player.wins ?? 0
-                  const isBot = player.isBot
-                  const isEditing = editingBotId === player.id
-                  return (
-                  <div key={player.id} style={{
-                    ...styles.playerItem,
-                    ...(isBot ? styles.botPlayerItem : {})
-                  }}>
-                    {isEditing ? (
-                      <div style={styles.botNameEditContainer}>
-                        <span>🤖 </span>
-                        <input
-                          type="text"
-                          value={editingBotName}
-                          onChange={(e) => setEditingBotName(e.target.value)}
-                          onKeyDown={handleBotNameKeyDown}
-                          onBlur={handleSaveBotName}
-                          style={styles.botNameInput}
-                          autoFocus
-                          maxLength={20}
-                        />
-                      </div>
-                    ) : (
-                      <span 
-                        style={{
-                          ...styles.playerName,
-                          ...(isBot && isHostEffective && gameState?.status !== 'PLAYING' ? styles.editableBotName : {})
-                        }}
-                        onClick={() => {
-                          if (isBot && isHostEffective && gameState?.status !== 'PLAYING') {
-                            handleStartEditBot(player)
-                          }
-                        }}
-                        title={isBot && isHostEffective && gameState?.status !== 'PLAYING' ? 'Click to rename' : ''}
-                      >
-                        {isBot && '🤖 '}
-                        {player.name} {player.id === socket?.id ? '(You)' : ''}
-                        {player.id === effectiveHostId && ' 👑'}
-                        {isBot && isHostEffective && gameState?.status !== 'PLAYING' && (
-                          <span style={styles.editIcon}>✏️</span>
-                        )}
-                      </span>
-                    )}
-                    <div style={styles.playerRightSection}>
-                      <span style={styles.playerWins}>{displayWins} wins</span>
-                      {isBot && isHostEffective && gameState?.status !== 'PLAYING' && (
-                        <button 
-                          onClick={() => handleRemoveBot(player.id)}
-                          style={styles.removeBotButton}
-                          title="Remove bot"
-                        >
-                          ✕
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )})}
+              <div style={styles.sectionHeader}>
+                <h2 style={styles.sectionTitle}>Players ({(uniquePlayers.length || 0)}/5)</h2>
+                {isHostEffective && gameState?.status !== 'PLAYING' && uniquePlayers.length > 1 && (
+                  <span style={styles.dragHint}>Drag to reorder</span>
+                )}
               </div>
+              <DndContext 
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleDragEnd}
+              >
+                <SortableContext 
+                  items={uniquePlayers.map(p => p.id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  <div style={styles.playersList}>
+                    {uniquePlayers.map((player, index) => (
+                      <SortablePlayerItem key={player.id} player={player} index={index} />
+                    ))}
+                  </div>
+                </SortableContext>
+              </DndContext>
               
               {/* Add Bot Button */}
               {isHostEffective && uniquePlayers.length < 5 && gameState?.status !== 'PLAYING' && (
@@ -549,6 +671,94 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
             {isHostEffective && uniquePlayers.length < 2 && (
               <div style={styles.waitingText}>
                 Waiting for more players (need at least 2)
+              </div>
+            )}
+
+            {/* Settings Button */}
+            {isHostEffective && gameState?.status !== 'PLAYING' && (
+              <button
+                onClick={() => setShowSettings(!showSettings)}
+                style={styles.settingsButton}
+              >
+                ⚙️ Game Settings
+              </button>
+            )}
+
+            {/* Settings Panel */}
+            {showSettings && isHostEffective && (
+              <div style={styles.settingsPanel}>
+                <h3 style={styles.settingsTitle}>Game Settings</h3>
+                
+                <div style={styles.settingItem}>
+                  <label style={styles.settingLabel}>
+                    Starting Hand Size
+                  </label>
+                  <select
+                    value={gameSettings.handSize || 'auto'}
+                    onChange={(e) => handleUpdateSettings({ 
+                      handSize: e.target.value === 'auto' ? null : parseInt(e.target.value) 
+                    })}
+                    style={styles.settingSelect}
+                  >
+                    <option value="auto">Auto (10 for 2-3 players, 8 for 4-5)</option>
+                    <option value="8">8 cards</option>
+                    <option value="10">10 cards</option>
+                    <option value="12">12 cards</option>
+                  </select>
+                </div>
+
+                <div style={styles.settingItem}>
+                  <label style={styles.settingLabel}>
+                    Turn Timer (seconds)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="300"
+                    value={gameSettings.turnTimer}
+                    onChange={(e) => handleUpdateSettings({ 
+                      turnTimer: parseInt(e.target.value) || 0 
+                    })}
+                    style={styles.settingInput}
+                    placeholder="0 = no timer"
+                  />
+                </div>
+
+                <div style={styles.settingItem}>
+                  <label style={styles.settingToggle}>
+                    <input
+                      type="checkbox"
+                      checked={gameSettings.autoStart}
+                      onChange={(e) => handleUpdateSettings({ autoStart: e.target.checked })}
+                      style={styles.toggleCheckbox}
+                    />
+                    <span>Auto-start when room is full</span>
+                  </label>
+                </div>
+
+                <div style={styles.settingItem}>
+                  <label style={styles.settingToggle}>
+                    <input
+                      type="checkbox"
+                      checked={gameSettings.allowRINGO}
+                      onChange={(e) => handleUpdateSettings({ allowRINGO: e.target.checked })}
+                      style={styles.toggleCheckbox}
+                    />
+                    <span>Allow RINGO (winning move)</span>
+                  </label>
+                </div>
+
+                <div style={styles.settingItem}>
+                  <label style={styles.settingToggle}>
+                    <input
+                      type="checkbox"
+                      checked={gameSettings.spectatorMode}
+                      onChange={(e) => handleUpdateSettings({ spectatorMode: e.target.checked })}
+                      style={styles.toggleCheckbox}
+                    />
+                    <span>Allow spectators (view-only)</span>
+                  </label>
+                </div>
               </div>
             )}
           </div>
@@ -1239,5 +1449,95 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     gap: '12px'
+  },
+  sectionHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '12px'
+  },
+  dragHint: {
+    fontSize: '12px',
+    color: '#999',
+    fontStyle: 'italic'
+  },
+  dragHandle: {
+    cursor: 'grab',
+    padding: '8px',
+    color: '#999',
+    display: 'flex',
+    alignItems: 'center',
+    marginRight: '8px',
+    touchAction: 'none'
+  },
+  settingsButton: {
+    width: '100%',
+    background: 'rgba(102, 126, 234, 0.1)',
+    border: '2px solid #667eea',
+    color: '#667eea',
+    padding: '12px 20px',
+    borderRadius: '12px',
+    fontSize: '16px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    marginTop: '16px',
+    transition: 'all 0.2s'
+  },
+  settingsPanel: {
+    marginTop: '20px',
+    padding: '20px',
+    background: 'rgba(248, 249, 250, 0.8)',
+    borderRadius: '16px',
+    border: '1px solid rgba(102, 126, 234, 0.2)'
+  },
+  settingsTitle: {
+    fontSize: '20px',
+    fontWeight: '700',
+    color: '#444',
+    marginBottom: '20px',
+    textAlign: 'left'
+  },
+  settingItem: {
+    marginBottom: '20px'
+  },
+  settingLabel: {
+    display: 'block',
+    fontSize: '14px',
+    fontWeight: '600',
+    color: '#555',
+    marginBottom: '8px',
+    textAlign: 'left'
+  },
+  settingSelect: {
+    width: '100%',
+    padding: '10px 12px',
+    fontSize: '14px',
+    border: '2px solid #e0e0e0',
+    borderRadius: '8px',
+    background: 'white',
+    cursor: 'pointer'
+  },
+  settingInput: {
+    width: '100%',
+    padding: '10px 12px',
+    fontSize: '14px',
+    border: '2px solid #e0e0e0',
+    borderRadius: '8px',
+    background: 'white'
+  },
+  settingToggle: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    fontSize: '14px',
+    color: '#555',
+    cursor: 'pointer',
+    textAlign: 'left'
+  },
+  toggleCheckbox: {
+    width: '18px',
+    height: '18px',
+    cursor: 'pointer',
+    accentColor: '#667eea'
   }
 }

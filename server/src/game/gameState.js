@@ -14,9 +14,10 @@ export const TurnPhase = {
   WAITING_FOR_CAPTURE_DECISION: 'WAITING_FOR_CAPTURE_DECISION'
 }
 
-export function createGameState(players, previousWinner = null) {
+export function createGameState(players, previousWinner = null, settings = {}) {
   const numPlayers = players.length
-  const handSize = numPlayers <= 3 ? 10 : 8
+  // Use settings handSize if provided, otherwise use default logic
+  const handSize = settings?.handSize || (numPlayers <= 3 ? 10 : 8)
 
   const deck = createDeck()
   const gamePlayers = players.map((player, index) => ({

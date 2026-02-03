@@ -784,6 +784,89 @@ export function setupSocketHandlers(io) {
       }
     })
 
+    socket.on('reorderPlayers', (data, callback) => {
+      if (!checkRateLimit(socket.id)) {
+        return callback({ error: 'Rate limit exceeded' })
+      }
+
+      try {
+        const room = roomManager.getRoom(data.roomCode)
+        if (!room) {
+          return callback({ error: 'Room not found' })
+        }
+        room.updateActivity()
+
+        if (room.hostId !== socket.id) {
+          return callback({ error: 'Only host can reorder players' })
+        }
+
+        if (room.gameState && room.gameState.status === GameStatus.PLAYING) {
+          return callback({ error: 'Cannot reorder players during a game' })
+        }
+
+        if (!data.playerOrder || !Array.isArray(data.playerOrder)) {
+          return callback({ error: 'Invalid player order' })
+        }
+
+        // Reorder players array based on provided order
+        const playerMap = new Map(room.players.map(p => [p.id, p]))
+        const reorderedPlayers = data.playerOrder
+          .map(id => playerMap.get(id))
+          .filter(p => p !== undefined)
+
+        // Add any players not in the order (shouldn't happen, but safety check)
+        const orderedIds = new Set(data.playerOrder)
+        const missingPlayers = room.players.filter(p => !orderedIds.has(p.id))
+        reorderedPlayers.push(...missingPlayers)
+
+        room.players = reorderedPlayers
+
+        io.to(room.code).emit('roomUpdate', {
+          players: room.players,
+          roomCode: room.code,
+          hostId: room.hostId
+        })
+
+        callback({ success: true, players: room.players })
+      } catch (error) {
+        callback({ error: error.message })
+      }
+    })
+
+    socket.on('updateRoomSettings', (data, callback) => {
+      if (!checkRateLimit(socket.id)) {
+        return callback({ error: 'Rate limit exceeded' })
+      }
+
+      try {
+        const room = roomManager.getRoom(data.roomCode)
+        if (!room) {
+          return callback({ error: 'Room not found' })
+        }
+        room.updateActivity()
+
+        if (room.hostId !== socket.id) {
+          return callback({ error: 'Only host can update settings' })
+        }
+
+        if (room.gameState && room.gameState.status === GameStatus.PLAYING) {
+          return callback({ error: 'Cannot update settings during a game' })
+        }
+
+        // Store settings in room
+        room.settings = { ...room.settings, ...data.settings }
+
+        io.to(room.code).emit('roomSettingsUpdate', {
+          settings: room.settings,
+          roomCode: room.code
+        })
+
+        callback({ success: true, settings: room.settings })
+      } catch (error) {
+        callback({ error: error.message })
+      }
+    })
+
     socket.on('startGame', (data, callback) => {
       if (!checkRateLimit(socket.id)) {
         return callback({ error: 'Rate limit exceeded' })
@@ -812,6 +895,11 @@ export function setupSocketHandlers(io) {
           return callback({ error: 'Game already in progress' })
         }
 
+        // Store settings if provided
+        if (data.settings) {
+          room.settings = { ...room.settings, ...data.settings }
+        }
+
         const previousWinner = room.gameState?.previousWinner || null
         
         // Clear wins tracking for the new game
@@ -822,7 +910,7 @@ export function setupSocketHandlers(io) {
           }
         }
         
-        room.gameState = createGameState(room.players, previousWinner)
+        room.gameState = createGameState(room.players, previousWinner, room.settings)
         room.updateActivity()
 
         // Emit a signal to clear old game state before sending new one
