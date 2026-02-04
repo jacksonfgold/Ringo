@@ -945,6 +945,10 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
                   socket.emit('giveWorstHand', {
                     roomCode: effectiveRoomCode,
                     targetPlayerId: player.id
+                  }, (response) => {
+                    if (response?.error) {
+                      console.error('[GameBoard] Worst hand error:', response.error)
+                    }
                   })
                 }
               }
