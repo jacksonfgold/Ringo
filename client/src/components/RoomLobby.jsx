@@ -379,6 +379,11 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
     
     // Easter egg: Host can click player 5 times quickly to give them worst hand
     const handlePlayerClick = (e) => {
+      // Don't trigger if clicking on interactive elements (buttons, drag handle, input)
+      if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT' || e.target.closest('.dragHandle')) {
+        return
+      }
+      
       if (isMe) return // Don't allow clicking yourself
       if (!isHostEffective) return // Only host can do this
       if (!gameState || gameState.status !== 'PLAYING') return // Only during game
