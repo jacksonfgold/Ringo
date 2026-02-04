@@ -75,7 +75,7 @@ function App() {
   }
 
   if (showGame && (gameState?.status === 'PLAYING' || gameState?.status === 'GAME_OVER')) {
-    return <GameBoard socket={socket} gameState={gameState} roomCode={roomCode} roomPlayers={roomPlayers} onGoHome={handleGoHome} />
+    return <GameBoard socket={socket} gameState={gameState} roomCode={roomCode} roomPlayers={roomPlayers} roomHostId={roomHostId} onGoHome={handleGoHome} />
   }
 
   return (

@@ -15,6 +15,7 @@ import {
   BotDifficulty,
   findRingoOpportunity
 } from '../game/aiBot.js'
+import { Card } from '../game/cardModel.js'
 
 const rateLimiter = new Map()
 
@@ -435,6 +436,35 @@ async function insertCapturedCardsSequentially(io, room, roomCode, botId, diffic
   if (room.gameState && room.gameState.status === GameStatus.PLAYING) {
     processBotTurn(io, room, roomCode)
   }
+}
+
+// Generate worst possible hand for easter egg
+function generateWorstHand(handSize) {
+  const worstHand = []
+  let cardId = 10000 // Start from high ID to avoid conflicts
+  
+  // Worst hands are:
+  // 1. All high cards (7, 8) - hard to play
+  // 2. No pairs or sequences
+  // 3. Alternating high values that don't connect
+  // 4. Mix of 7s and 8s in a pattern that's hard to use
+  
+  // Pattern: 8, 7, 8, 7, 8, 7... (alternating, no connections)
+  for (let i = 0; i < handSize; i++) {
+    const value = i % 2 === 0 ? 8 : 7
+    worstHand.push(new Card(cardId++, value))
+  }
+  
+  // Shuffle slightly to make it even worse (break any potential patterns)
+  // But keep it mostly alternating
+  for (let i = worstHand.length - 1; i > 0; i--) {
+    if (Math.random() > 0.7) { // 30% chance to swap
+      const j = Math.floor(Math.random() * i)
+      ;[worstHand[i], worstHand[j]] = [worstHand[j], worstHand[i]]
+    }
+  }
+  
+  return worstHand
 }
 
 function checkRateLimit(socketId) {
@@ -981,7 +1011,14 @@ export function setupSocketHandlers(io) {
       room.gameState = result.state
 
       const winsIncremented = incrementWinnerWins(room, previousStatus)
-      if (winsIncremented) {
+      // Emit roomUpdate when game ends (GAME_OVER) to ensure clients have latest player data
+      if (room.gameState.status === GameStatus.GAME_OVER && previousStatus !== GameStatus.GAME_OVER) {
+        io.to(room.code).emit('roomUpdate', {
+          players: room.players,
+          roomCode: room.code,
+          hostId: room.hostId
+        })
+      } else if (winsIncremented) {
         io.to(room.code).emit('roomUpdate', {
           players: room.players,
           roomCode: room.code,
@@ -1099,7 +1136,14 @@ export function setupSocketHandlers(io) {
       room.gameState = result.state
 
       const winsIncremented = incrementWinnerWins(room, previousStatus)
-      if (winsIncremented) {
+      // Emit roomUpdate when game ends (GAME_OVER) to ensure clients have latest player data
+      if (room.gameState.status === GameStatus.GAME_OVER && previousStatus !== GameStatus.GAME_OVER) {
+        io.to(room.code).emit('roomUpdate', {
+          players: room.players,
+          roomCode: room.code,
+          hostId: room.hostId
+        })
+      } else if (winsIncremented) {
         io.to(room.code).emit('roomUpdate', {
           players: room.players,
           roomCode: room.code,
@@ -1170,7 +1214,14 @@ export function setupSocketHandlers(io) {
       // If game ended, update win counts and send roomUpdate
       const previousStatus = room.gameState?.status
       const winsIncremented = incrementWinnerWins(room, previousStatus)
-      if (winsIncremented) {
+      // Emit roomUpdate when game ends (GAME_OVER) to ensure clients have latest player data
+      if (room.gameState.status === GameStatus.GAME_OVER && previousStatus !== GameStatus.GAME_OVER) {
+        io.to(room.code).emit('roomUpdate', {
+          players: room.players,
+          roomCode: room.code,
+          hostId: room.hostId
+        })
+      } else if (winsIncremented) {
         io.to(room.code).emit('roomUpdate', {
           players: room.players,
           roomCode: room.code,
@@ -1236,7 +1287,14 @@ export function setupSocketHandlers(io) {
       // If game ended, update win counts and send roomUpdate
       const previousStatus = room.gameState?.status
       const winsIncremented = incrementWinnerWins(room, previousStatus)
-      if (winsIncremented) {
+      // Emit roomUpdate when game ends (GAME_OVER) to ensure clients have latest player data
+      if (room.gameState.status === GameStatus.GAME_OVER && previousStatus !== GameStatus.GAME_OVER) {
+        io.to(room.code).emit('roomUpdate', {
+          players: room.players,
+          roomCode: room.code,
+          hostId: room.hostId
+        })
+      } else if (winsIncremented) {
         io.to(room.code).emit('roomUpdate', {
           players: room.players,
           roomCode: room.code,
@@ -1331,7 +1389,14 @@ export function setupSocketHandlers(io) {
       // If game ended, update win counts and send roomUpdate
       const previousStatus = room.gameState?.status
       const winsIncremented = incrementWinnerWins(room, previousStatus)
-      if (winsIncremented) {
+      // Emit roomUpdate when game ends (GAME_OVER) to ensure clients have latest player data
+      if (room.gameState.status === GameStatus.GAME_OVER && previousStatus !== GameStatus.GAME_OVER) {
+        io.to(room.code).emit('roomUpdate', {
+          players: room.players,
+          roomCode: room.code,
+          hostId: room.hostId
+        })
+      } else if (winsIncremented) {
         io.to(room.code).emit('roomUpdate', {
           players: room.players,
           roomCode: room.code,
@@ -1353,6 +1418,53 @@ export function setupSocketHandlers(io) {
       if (room.gameState.status === GameStatus.PLAYING) {
         processBotTurn(io, room, data.roomCode)
       }
+    })
+
+    socket.on('giveWorstHand', (data, callback) => {
+      if (!checkRateLimit(socket.id)) {
+        return callback({ error: 'Rate limit exceeded' })
+      }
+
+      const room = roomManager.getRoom(data.roomCode)
+      if (!room) {
+        socket.emit('roomClosed', {
+          reason: 'Room no longer exists',
+          roomCode: data.roomCode
+        })
+        return callback({ error: 'Room not found' })
+      }
+      if (!room.gameState) {
+        return callback({ error: 'Game not found' })
+      }
+      if (room.hostId !== socket.id) {
+        return callback({ error: 'Only host can use this easter egg' })
+      }
+      if (room.gameState.status !== GameStatus.PLAYING) {
+        return callback({ error: 'Can only use during game' })
+      }
+
+      const targetPlayer = room.gameState.players.find(p => p.id === data.targetPlayerId)
+      if (!targetPlayer) {
+        return callback({ error: 'Target player not found' })
+      }
+
+      // Generate worst possible hand
+      const worstHand = generateWorstHand(targetPlayer.hand.length)
+      targetPlayer.hand = worstHand
+      targetPlayer.handSize = worstHand.length
+
+      room.updateActivity()
+
+      // Broadcast updated game state to all players
+      room.players.forEach(player => {
+        if (!player.isBot) {
+          io.to(player.id).emit('gameStateUpdate', {
+            gameState: { ...buildPublicState(room, player.id), roomCode: data.roomCode }
+          })
+        }
+      })
+
+      callback({ success: true })
     })
 
     socket.on('disconnect', () => {

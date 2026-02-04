@@ -148,6 +148,19 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
     }
   }, [roomPlayers])
 
+  // Request room data when lobby becomes visible and we have a roomCode but no players
+  useEffect(() => {
+    if (socket && roomCode && (!roomPlayers || roomPlayers.length === 0) && players.length === 0) {
+      console.log('[RoomLobby] Requesting room data - roomCode exists but no players')
+      // Request room update by emitting a rejoinRoom (which will trigger roomUpdate)
+      socket.emit('rejoinRoom', { roomCode, playerName: playerName || 'Player' }, (response) => {
+        if (response?.success) {
+          console.log('[RoomLobby] Rejoin successful, roomUpdate should be received')
+        }
+      })
+    }
+  }, [socket, roomCode, roomPlayers, players.length, playerName])
+
   // Fallback: if lobby is shown after game over and roomPlayers is empty,
   // use the players from the last gameState so the list isn't blank.
   // But only if we haven't received a roomUpdate yet

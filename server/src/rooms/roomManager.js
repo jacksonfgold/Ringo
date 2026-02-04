@@ -39,7 +39,14 @@ class Room {
   removePlayer(playerId) {
     this.players = this.players.filter(p => p.id !== playerId)
     if (this.hostId === playerId && this.players.length > 0) {
-      this.hostId = this.players[0].id
+      // Find first non-bot player to become host
+      const humanPlayer = this.players.find(p => !p.isBot)
+      if (humanPlayer) {
+        this.hostId = humanPlayer.id
+      } else {
+        // If no human players left, assign to first player (shouldn't happen in normal flow)
+        this.hostId = this.players[0].id
+      }
     }
     return this.players
   }
