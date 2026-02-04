@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useSocket } from './hooks/useSocket'
 import RoomLobby from './components/RoomLobby'
 import GameBoard from './components/GameBoard'
+import { ToastContainer } from './components/Toast'
 
 function App() {
   const { socket, connected, gameState, roomPlayers, roomCode, roomHostId, setRoomCode, setPlayerName, clearSavedState, setGameState, roomClosedError, setRoomClosedError } = useSocket()
@@ -77,7 +78,12 @@ function App() {
     return <GameBoard socket={socket} gameState={gameState} roomCode={roomCode} roomPlayers={roomPlayers} onGoHome={handleGoHome} />
   }
 
-  return <RoomLobby socket={socket} gameState={gameState} roomCode={roomCode} roomPlayers={roomPlayers} roomHostId={roomHostId} setRoomCode={setRoomCode} setPlayerName={setPlayerName} clearSavedState={clearSavedState} setGameState={setGameState} roomClosedError={roomClosedError} setRoomClosedError={setRoomClosedError} />
+  return (
+    <>
+      <RoomLobby socket={socket} gameState={gameState} roomCode={roomCode} roomPlayers={roomPlayers} roomHostId={roomHostId} setRoomCode={setRoomCode} setPlayerName={setPlayerName} clearSavedState={clearSavedState} setGameState={setGameState} roomClosedError={roomClosedError} setRoomClosedError={setRoomClosedError} />
+      <ToastContainer />
+    </>
+  )
 }
 
 export default App

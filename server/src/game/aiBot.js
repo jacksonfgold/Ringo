@@ -429,6 +429,8 @@ function mediumModeDecision(gameState, botId) {
   let bestPlay = null
   let bestScore = -Infinity
   
+  const numPlayers = gameState.players.length
+  
   for (const play of validPlays) {
     const testHand = hand.filter((_, i) => !play.indices.includes(i))
     const oldMessiness = calculateMessiness(hand)
@@ -450,7 +452,33 @@ function mediumModeDecision(gameState, botId) {
       unblockBonus += 15 // Created a larger group by unblocking
     }
     
-    const score = messinessReduction * 6 + unblockBonus - play.size * 2 + play.value
+    // PILE CLOSING STRATEGY (Medium mode): Consider playing large combos to close pile
+    let pileClosingBonus = 0
+    if (play.size >= 4) {
+      // Estimate if opponents can beat this large combo
+      let estimatedPassProbability = 1.0
+      for (let i = 1; i < numPlayers; i++) {
+        const playerIdx = (gameState.currentPlayerIndex + i) % numPlayers
+        const player = gameState.players[playerIdx]
+        if (player.id === botId) continue
+        
+        const playerHandSize = player.hand?.length || 0
+        if (play.size >= 4 && playerHandSize < 6) {
+          estimatedPassProbability *= 0.6
+        } else {
+          estimatedPassProbability *= 0.4
+        }
+      }
+      
+      const remainingGroups = findAdjacentGroups(testHand)
+      const hasGoodEmptyBoardPlay = remainingGroups.some(g => g.size >= 2)
+      
+      if (estimatedPassProbability > 0.25 && hasGoodEmptyBoardPlay) {
+        pileClosingBonus = play.size * 5 * estimatedPassProbability
+      }
+    }
+    
+    const score = messinessReduction * 6 + unblockBonus - play.size * 2 + play.value + pileClosingBonus
     
     if (score > bestScore) {
       bestScore = score
@@ -667,6 +695,10 @@ function hardModeDecision(gameState, botId) {
   let bestPlay = null
   let bestScore = -Infinity
   
+  // Calculate how many players need to pass before combo comes back to us (pile closing)
+  const numPlayers = gameState.players.length
+  const playersUntilReturn = numPlayers - 1 // Combo cycles through all other players
+  
   for (const play of validPlays) {
     const testHand = hand.filter((_, i) => !play.indices.includes(i))
     
@@ -702,13 +734,53 @@ function hardModeDecision(gameState, botId) {
       if (play.size >= 3) denialBonus += 10
     }
     
+    // PILE CLOSING STRATEGY: Play large combos that will likely come back to us
+    // This is valuable because we get to play on an empty board
+    let pileClosingBonus = 0
+    if (play.size >= 4) {
+      // Large combos are harder to beat - more likely to cycle back
+      // Estimate probability that all opponents will need to draw
+      let estimatedPassProbability = 1.0
+      for (let i = 1; i < numPlayers; i++) {
+        const playerIdx = (gameState.currentPlayerIndex + i) % numPlayers
+        const player = gameState.players[playerIdx]
+        if (player.id === botId) continue // Skip ourselves
+        
+        const playerHandSize = player.hand?.length || 0
+        // Estimate: larger combos are harder to beat, especially for players with fewer cards
+        // If combo size is 4+, and player has <6 cards, they're unlikely to have a matching combo
+        if (play.size >= 4 && playerHandSize < 6) {
+          estimatedPassProbability *= 0.7 // 70% chance they can't beat it
+        } else if (play.size >= 3 && playerHandSize < 5) {
+          estimatedPassProbability *= 0.5 // 50% chance
+        } else {
+          estimatedPassProbability *= 0.3 // 30% chance for smaller combos
+        }
+      }
+      
+      // If there's a good chance the pile will close, give bonus
+      // Also check if we have good cards saved for an empty board play
+      const remainingGroups = findAdjacentGroups(testHand)
+      const hasGoodEmptyBoardPlay = remainingGroups.some(g => g.size >= 2) || testHand.length > 0
+      
+      if (estimatedPassProbability > 0.3 && hasGoodEmptyBoardPlay) {
+        // Bonus scales with combo size and probability of closing
+        pileClosingBonus = play.size * 8 * estimatedPassProbability
+        // Extra bonus if we have a large group saved for empty board
+        const maxRemainingGroup = Math.max(...remainingGroups.map(g => g.size), 0)
+        if (maxRemainingGroup >= 3) {
+          pileClosingBonus += 15 // We have a triple+ saved for empty board
+        }
+      }
+    }
+    
     // Defensive bonus: if we can prevent opponent from winning
     let defensiveBonus = 0
     if (opponentInDanger) {
       defensiveBonus = 20 // Strong preference to beat
     }
     
-    const score = 6 * cardsShed + 6 * messinessReduction + unblockBonus + tempoGain - 3 * ammoSpent + denialBonus + defensiveBonus
+    const score = 6 * cardsShed + 6 * messinessReduction + unblockBonus + tempoGain - 3 * ammoSpent + denialBonus + defensiveBonus + pileClosingBonus
     
     // Add small randomness (5%)
     const randomFactor = (Math.random() - 0.5) * score * 0.05

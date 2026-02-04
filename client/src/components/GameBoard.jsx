@@ -85,6 +85,7 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
     return false
   })
   const [ringoShake, setRingoShake] = useState(false)
+  const [botThinking, setBotThinking] = useState(false)
 
   // Configure sensors for drag vs click distinction
   const mouseSensor = useSensor(MouseSensor, {
@@ -268,6 +269,17 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
         const myIdx = data.gameState.players?.findIndex(p => p.id === socket.id) ?? -1
         const isMyTurnNow = data.gameState.currentPlayerIndex === myIdx
         const wasMyTurn = gameState?.currentPlayerIndex === myIdx
+        const currentPlayer = data.gameState.players?.[data.gameState.currentPlayerIndex]
+        const isBotTurn = currentPlayer && roomPlayers.find(p => p.id === currentPlayer.id)?.isBot
+        
+        // Show bot thinking indicator
+        if (isBotTurn && !isMyTurnNow && data.gameState.status === 'PLAYING') {
+          setBotThinking(true)
+          // Hide after a delay (bot should have moved by then)
+          setTimeout(() => setBotThinking(false), 3000)
+        } else {
+          setBotThinking(false)
+        }
         
         if (isMyTurnNow && !wasMyTurn && data.gameState.status === 'PLAYING') {
           soundManager.playTurnNotification()
@@ -815,6 +827,14 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
         {ringoShake && (
           <div style={styles.ringoFlashOverlay}>
             <div style={styles.ringoFlashText}>RINGO!!!</div>
+          </div>
+        )}
+        {botThinking && (
+          <div style={styles.botThinkingOverlay}>
+            <div style={styles.botThinkingContent}>
+              <div style={styles.botThinkingSpinner}>🤖</div>
+              <div style={styles.botThinkingText}>Bot is thinking...</div>
+            </div>
           </div>
         )}
         <button
@@ -1894,9 +1914,10 @@ const styles = {
   },
   selectedCard: {
     transform: 'translateY(-16px) scale(1.1)',
-    boxShadow: '0 12px 24px rgba(0,0,0,0.25)',
+    boxShadow: '0 12px 24px rgba(0,0,0,0.25), 0 0 20px rgba(102, 126, 234, 0.6)',
     border: '3px solid #fff',
-    zIndex: 10
+    zIndex: 10,
+    animation: 'cardGlow 1.5s ease-in-out infinite'
   },
   invalidCard: {
     border: '3px solid #e74c3c',
@@ -1905,7 +1926,9 @@ const styles = {
   },
   adjacentCard: {
     border: '2px dashed rgba(255,255,255,0.8)',
-    transform: 'translateY(-4px)'
+    transform: 'translateY(-4px)',
+    boxShadow: '0 4px 12px rgba(102, 126, 234, 0.3)',
+    background: 'rgba(255, 255, 255, 0.1) !important'
   },
   cardValue: {
     fontSize: '32px',

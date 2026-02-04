@@ -767,6 +767,51 @@ export function nightmareModeDecision(gameState, botId, roomCode) {
       if (newCost < oldCost) {
         playBonus += (oldCost - newCost) * 2 // Reward hand improvement
       }
+      
+      // PILE CLOSING STRATEGY (Nightmare mode): Play large combos to force pile closure
+      if (candidate.comboSize >= 4) {
+        const numPlayers = gameState.players.length
+        let estimatedPassProbability = 1.0
+        
+        // Estimate probability that all opponents will need to draw
+        for (let i = 1; i < numPlayers; i++) {
+          const playerIdx = (gameState.currentPlayerIndex + i) % numPlayers
+          const player = gameState.players[playerIdx]
+          if (player.id === botId) continue
+          
+          const playerHandSize = player.hand?.length || 0
+          // Use belief model if available to better estimate
+          const beliefs = beliefStates.get(roomCode)
+          const belief = beliefs?.get(player.id)
+          
+          if (candidate.comboSize >= 5 && playerHandSize < 5) {
+            estimatedPassProbability *= 0.75 // Very hard to beat
+          } else if (candidate.comboSize >= 4 && playerHandSize < 6) {
+            estimatedPassProbability *= 0.65
+          } else if (belief && candidate.comboSize >= 4) {
+            // Use belief model: check if they likely have combos of this size
+            const canRespond = belief.canRespond?.[candidate.comboSize] || 0.3
+            estimatedPassProbability *= (1 - canRespond)
+          } else {
+            estimatedPassProbability *= 0.4
+          }
+        }
+        
+        // Check if we have good cards saved for empty board play
+        const remainingGroups = findAdjacentGroups(testHand)
+        const hasGoodEmptyBoardPlay = remainingGroups.some(g => g.size >= 2) || testHand.length > 0
+        const maxRemainingGroup = Math.max(...remainingGroups.map(g => g.size), 0)
+        
+        if (estimatedPassProbability > 0.3 && hasGoodEmptyBoardPlay) {
+          // Bonus scales with combo size, probability, and quality of saved cards
+          playBonus += candidate.comboSize * 10 * estimatedPassProbability
+          if (maxRemainingGroup >= 3) {
+            playBonus += 20 // We have a triple+ saved for empty board
+          } else if (maxRemainingGroup >= 2) {
+            playBonus += 10 // We have a pair saved
+          }
+        }
+      }
     }
     
     const utility = 

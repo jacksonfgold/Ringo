@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
+import { showToast } from './Toast'
 
 export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHostId = null, roomCode: initialRoomCode, setRoomCode: setRoomCodeProp, setPlayerName: setPlayerNameProp, clearSavedState, setGameState: setGameStateProp, roomClosedError, setRoomClosedError }) {
   const [roomCode, setRoomCode] = useState(initialRoomCode || '')
@@ -278,12 +279,20 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
 
   const handleStartGame = () => {
     if (!roomCode) return
+    if (loadingActions.has('startGame')) return
 
+    setLoadingActions(prev => new Set(prev).add('startGame'))
     socket.emit('startGame', { roomCode, settings: gameSettings }, (response) => {
+      setLoadingActions(prev => {
+        const next = new Set(prev)
+        next.delete('startGame')
+        return next
+      })
       if (!response.success) {
-        alert(response.error || 'Failed to start game')
+        showToast(response.error || 'Failed to start game', 'error')
         console.error('Start game error:', response)
       } else {
+        showToast('Game starting...', 'success')
         console.log('Game started successfully')
       }
     })
@@ -425,19 +434,37 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
     )
   }
 
+  const [loadingActions, setLoadingActions] = useState(new Set())
+
   const handleAddBot = (difficulty) => {
+    setLoadingActions(prev => new Set(prev).add('addBot'))
     socket.emit('addBot', { roomCode, difficulty }, (response) => {
+      setLoadingActions(prev => {
+        const next = new Set(prev)
+        next.delete('addBot')
+        return next
+      })
       if (!response.success) {
-        alert(response.error || 'Failed to add bot')
+        showToast(response.error || 'Failed to add bot', 'error')
+      } else {
+        showToast('Bot added successfully', 'success')
       }
       setShowBotMenu(false)
     })
   }
 
   const handleRemoveBot = (botId) => {
+    setLoadingActions(prev => new Set(prev).add(`removeBot-${botId}`))
     socket.emit('removeBot', { roomCode, botId }, (response) => {
+      setLoadingActions(prev => {
+        const next = new Set(prev)
+        next.delete(`removeBot-${botId}`)
+        return next
+      })
       if (!response.success) {
-        alert(response.error || 'Failed to remove bot')
+        showToast(response.error || 'Failed to remove bot', 'error')
+      } else {
+        showToast('Bot removed', 'success')
       }
     })
   }
@@ -459,7 +486,9 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
       newName: editingBotName.trim() 
     }, (response) => {
       if (!response.success) {
-        alert(response.error || 'Failed to rename bot')
+        showToast(response.error || 'Failed to rename bot', 'error')
+      } else {
+        showToast('Bot renamed', 'success')
       }
       setEditingBotId(null)
       setEditingBotName('')
@@ -1100,7 +1129,12 @@ const styles = {
   },
   playersSection: {
     marginBottom: '32px',
-    textAlign: 'left'
+    textAlign: 'left',
+    padding: '20px',
+    background: 'rgba(248, 249, 250, 0.6)',
+    borderRadius: '16px',
+    border: '1px solid rgba(0,0,0,0.05)',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.05)'
   },
   sectionTitle: {
     fontSize: '18px',
@@ -1121,14 +1155,18 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: '16px',
-    background: '#f8f9fa',
+    background: '#ffffff',
     borderRadius: '12px',
-    border: '1px solid #eee',
-    transition: 'transform 0.2s',
+    border: '1px solid rgba(0,0,0,0.08)',
+    transition: 'all 0.2s ease',
     flexWrap: 'wrap',
     gap: '8px',
+    boxShadow: '0 2px 4px rgba(0,0,0,0.04)',
+    marginBottom: '8px',
     ':hover': {
-      transform: 'translateY(-2px)'
+      transform: 'translateY(-2px)',
+      boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+      borderColor: 'rgba(102, 126, 234, 0.3)'
     }
   },
   playerName: {
