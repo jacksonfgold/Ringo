@@ -13,7 +13,7 @@ export function validateAdjacentCards(hand, cardIndices) {
       return false
     }
   }
-
+//3
   // Check if indices are within hand bounds
   return sortedIndices.every(idx => idx >= 0 && idx < hand.length)
 }
