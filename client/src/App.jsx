@@ -8,8 +8,15 @@ function App() {
   const { socket, connected, gameState, roomPlayers, roomCode, roomHostId, setRoomCode, setPlayerName, clearSavedState, setGameState, roomClosedError, setRoomClosedError } = useSocket()
   const [connectionTimeout, setConnectionTimeout] = useState(false)
   const [showGame, setShowGame] = useState(false)
+  const [returningToLobby, setReturningToLobby] = useState(false)
 
   useEffect(() => {
+    // If we're returning to lobby, don't show game even if gameState exists
+    if (returningToLobby) {
+      setShowGame(false)
+      return
+    }
+    
     // Show game while playing or if game just ended
     if (gameState?.status === 'PLAYING' || gameState?.status === 'GAME_OVER') {
       setShowGame(true)
@@ -18,12 +25,18 @@ function App() {
       // But don't clear room data - user should stay in lobby
       setShowGame(false)
     }
-  }, [gameState])
+  }, [gameState, returningToLobby])
 
   const handleGoHome = () => {
+    setReturningToLobby(true)
     setShowGame(false)
     // Clear gameState when returning to lobby so the winning screen doesn't persist
     setGameState(null)
+    // Reset the flag after a delay to allow state to settle and prevent race conditions
+    // This prevents incoming gameStateUpdate events from re-showing the game
+    setTimeout(() => {
+      setReturningToLobby(false)
+    }, 500)
   }
 
   useEffect(() => {
@@ -74,7 +87,8 @@ function App() {
     )
   }
 
-  if (showGame && (gameState?.status === 'PLAYING' || gameState?.status === 'GAME_OVER')) {
+  // Only show game if showGame is true AND we're not returning to lobby
+  if (showGame && !returningToLobby && (gameState?.status === 'PLAYING' || gameState?.status === 'GAME_OVER')) {
     return <GameBoard socket={socket} gameState={gameState} roomCode={roomCode} roomPlayers={roomPlayers} onGoHome={handleGoHome} />
   }
 
