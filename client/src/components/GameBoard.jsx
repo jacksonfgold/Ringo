@@ -60,7 +60,7 @@ const getCardColor = (value) => {
   return colors[value] || '#7F8C8D'
 }
 
-export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [], roomHostId = null, onGoHome }) {
+export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [], onGoHome }) {
   const [selectedCards, setSelectedCards] = useState([])
   const [splitResolutions, setSplitResolutions] = useState({})
   const [drawnCard, setDrawnCard] = useState(null)
@@ -86,8 +86,6 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
   })
   const [ringoShake, setRingoShake] = useState(false)
   const [botThinking, setBotThinking] = useState(false)
-  const [screenFlash, setScreenFlash] = useState(false)
-  const [playerClickCounts, setPlayerClickCounts] = useState({}) // Track clicks per player: { playerId: { count: number, lastClick: timestamp } }
 
   // Configure sensors for drag vs click distinction
   const mouseSensor = useSensor(MouseSensor, {
@@ -813,21 +811,6 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <NotificationSystem socket={socket} />
-      {/* Screen flash overlay for easter egg */}
-      {screenFlash && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: '#ff00ff',
-          opacity: 0.7,
-          zIndex: 10000,
-          pointerEvents: 'none',
-          animation: 'screenFlash 0.5s ease-out'
-        }} />
-      )}
       <div 
         style={{
           ...styles.container,
@@ -905,65 +888,15 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
               
               const isBot = roomPlayers.find(p => p.id === player.id)?.isBot
               
-              // Easter egg: Host can click player card 5 times quickly to give them worst hand
-              const handlePlayerCardClick = (e) => {
-                if (isMe) return // Don't allow clicking your own card
-                if (socket.id !== roomHostId) return // Only host can do this
-                if (!gameState || gameState.status !== 'PLAYING') return // Only during game
-                
-                e.stopPropagation()
-                const now = Date.now()
-                const clickData = playerClickCounts[player.id] || { count: 0, lastClick: 0 }
-                
-                // Reset if more than 2 seconds since last click
-                if (now - clickData.lastClick > 2000) {
-                  clickData.count = 0
-                }
-                
-                clickData.count++
-                clickData.lastClick = now
-                
-                setPlayerClickCounts({
-                  ...playerClickCounts,
-                  [player.id]: clickData
-                })
-                
-                // If 5 clicks within 2 seconds, trigger worst hand
-                if (clickData.count >= 5) {
-                  // Flash screen
-                  setScreenFlash(true)
-                  setTimeout(() => setScreenFlash(false), 500)
-                  
-                  // Reset count
-                  setPlayerClickCounts({
-                    ...playerClickCounts,
-                    [player.id]: { count: 0, lastClick: 0 }
-                  })
-                  
-                  // Send to server
-                  const effectiveRoomCode = gameState?.roomCode || roomCode || ''
-                  socket.emit('giveWorstHand', {
-                    roomCode: effectiveRoomCode,
-                    targetPlayerId: player.id
-                  }, (response) => {
-                    if (response?.error) {
-                      console.error('[GameBoard] Worst hand error:', response.error)
-                    }
-                  })
-                }
-              }
-              
               return (
                 <div
                   key={player.id || `${player.name}-${index}`}
-                  onClick={handlePlayerCardClick}
                   style={{
                     ...styles.playerCard,
                     ...(isActive ? styles.activePlayer : {}),
                     ...(isMe ? styles.currentPlayerCard : {}),
                     ...(showAllCards ? styles.playerCardWithCards : {}),
-                    position: 'relative',
-                    cursor: socket.id === roomHostId && !isMe && gameState?.status === 'PLAYING' ? 'pointer' : 'default'
+                    position: 'relative'
                   }}
                 >
                   {isActive && (

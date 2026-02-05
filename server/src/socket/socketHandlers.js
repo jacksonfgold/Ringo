@@ -15,7 +15,6 @@ import {
   BotDifficulty,
   findRingoOpportunity
 } from '../game/aiBot.js'
-import { Card } from '../game/cardModel.js'
 
 const rateLimiter = new Map()
 
@@ -436,91 +435,6 @@ async function insertCapturedCardsSequentially(io, room, roomCode, botId, diffic
   if (room.gameState && room.gameState.status === GameStatus.PLAYING) {
     processBotTurn(io, room, roomCode)
   }
-}
-
-// Generate worst possible hand for easter egg - different patterns for variety
-function generateWorstHand(handSize) {
-  const worstHand = []
-  let cardId = 10000 + Math.floor(Math.random() * 1000) // Start from random high ID to avoid conflicts
-  
-  // Randomly choose from different worst hand patterns
-  const patternType = Math.floor(Math.random() * 5)
-  
-  switch (patternType) {
-    case 0:
-      // Pattern 1: Alternating 8s and 7s (no connections)
-      for (let i = 0; i < handSize; i++) {
-        const value = i % 2 === 0 ? 8 : 7
-        worstHand.push(new Card(cardId++, value))
-      }
-      break
-      
-    case 1:
-      // Pattern 2: All 8s (highest, hardest to play)
-      for (let i = 0; i < handSize; i++) {
-        worstHand.push(new Card(cardId++, 8))
-      }
-      break
-      
-    case 2:
-      // Pattern 3: All 7s (high but not highest, still bad)
-      for (let i = 0; i < handSize; i++) {
-        worstHand.push(new Card(cardId++, 7))
-      }
-      break
-      
-    case 3:
-      // Pattern 4: Mixed high cards (7, 8, 7, 8, 6, 8, 7...) - no sequences
-      const highValues = [6, 7, 8]
-      for (let i = 0; i < handSize; i++) {
-        // Alternate between values but ensure no sequences
-        let value
-        if (i === 0) {
-          value = 8
-        } else {
-          const prevValue = worstHand[i - 1].value
-          // Pick a value that doesn't create a sequence
-          if (prevValue === 8) {
-            value = Math.random() > 0.5 ? 6 : 7
-          } else if (prevValue === 7) {
-            value = Math.random() > 0.5 ? 8 : 6
-          } else {
-            value = Math.random() > 0.5 ? 8 : 7
-          }
-        }
-        worstHand.push(new Card(cardId++, value))
-      }
-      break
-      
-    case 4:
-      // Pattern 5: Scattered high values with gaps (8, 6, 8, 5, 7, 8...) - no pairs or sequences
-      const scatteredValues = [5, 6, 7, 8]
-      for (let i = 0; i < handSize; i++) {
-        let value
-        if (i === 0) {
-          value = 8
-        } else {
-          const prevValue = worstHand[i - 1].value
-          // Pick a different value that doesn't connect
-          const available = scatteredValues.filter(v => v !== prevValue && Math.abs(v - prevValue) > 1)
-          value = available.length > 0 
-            ? available[Math.floor(Math.random() * available.length)]
-            : scatteredValues[Math.floor(Math.random() * scatteredValues.length)]
-        }
-        worstHand.push(new Card(cardId++, value))
-      }
-      break
-  }
-  
-  // Final shuffle to break any remaining patterns (10% chance per swap)
-  for (let i = worstHand.length - 1; i > 0; i--) {
-    if (Math.random() > 0.9) {
-      const j = Math.floor(Math.random() * i)
-      ;[worstHand[i], worstHand[j]] = [worstHand[j], worstHand[i]]
-    }
-  }
-  
-  return worstHand
 }
 
 function checkRateLimit(socketId) {
@@ -1473,73 +1387,6 @@ export function setupSocketHandlers(io) {
       // Trigger bot turn if needed
       if (room.gameState.status === GameStatus.PLAYING) {
         processBotTurn(io, room, data.roomCode)
-      }
-    })
-
-    socket.on('giveWorstHand', (data, callback) => {
-      if (!checkRateLimit(socket.id)) {
-        if (typeof callback === 'function') {
-          return callback({ error: 'Rate limit exceeded' })
-        }
-        return
-      }
-
-      const room = roomManager.getRoom(data.roomCode)
-      if (!room) {
-        socket.emit('roomClosed', {
-          reason: 'Room no longer exists',
-          roomCode: data.roomCode
-        })
-        if (typeof callback === 'function') {
-          return callback({ error: 'Room not found' })
-        }
-        return
-      }
-      if (!room.gameState) {
-        if (typeof callback === 'function') {
-          return callback({ error: 'Game not found' })
-        }
-        return
-      }
-      if (room.hostId !== socket.id) {
-        if (typeof callback === 'function') {
-          return callback({ error: 'Only host can use this easter egg' })
-        }
-        return
-      }
-      if (room.gameState.status !== GameStatus.PLAYING) {
-        if (typeof callback === 'function') {
-          return callback({ error: 'Can only use during game' })
-        }
-        return
-      }
-
-      const targetPlayer = room.gameState.players.find(p => p.id === data.targetPlayerId)
-      if (!targetPlayer) {
-        if (typeof callback === 'function') {
-          return callback({ error: 'Target player not found' })
-        }
-        return
-      }
-
-      // Generate worst possible hand
-      const worstHand = generateWorstHand(targetPlayer.hand.length)
-      targetPlayer.hand = worstHand
-      targetPlayer.handSize = worstHand.length
-
-      room.updateActivity()
-
-      // Broadcast updated game state to all players
-      room.players.forEach(player => {
-        if (!player.isBot) {
-          io.to(player.id).emit('gameStateUpdate', {
-            gameState: { ...buildPublicState(room, player.id), roomCode: data.roomCode }
-          })
-        }
-      })
-
-      if (typeof callback === 'function') {
-        callback({ success: true })
       }
     })
 

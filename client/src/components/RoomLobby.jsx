@@ -30,8 +30,6 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
   })
 
   const [copyFeedback, setCopyFeedback] = useState(false)
-  const [screenFlash, setScreenFlash] = useState(false)
-  const [playerClickCounts, setPlayerClickCounts] = useState({}) // Track clicks per player
   
   // Drag and drop sensors
   const sensors = useSensors(
@@ -375,69 +373,14 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
     const displayWins = winsFromRoom ?? player.wins ?? 0
     const isBot = player.isBot
     const isEditing = editingBotId === player.id
-    const isMe = player.id === socket?.id
-    
-    // Easter egg: Host can click player 5 times quickly to give them worst hand
-    const handlePlayerClick = (e) => {
-      // Don't trigger if clicking on interactive elements (buttons, drag handle, input)
-      if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT' || e.target.closest('.dragHandle')) {
-        return
-      }
-      
-      if (isMe) return // Don't allow clicking yourself
-      if (!isHostEffective) return // Only host can do this
-      if (!gameState || gameState.status !== 'PLAYING') return // Only during game
-      
-      e.stopPropagation()
-      const now = Date.now()
-      const clickData = playerClickCounts[player.id] || { count: 0, lastClick: 0 }
-      
-      // Reset if more than 2 seconds since last click
-      if (now - clickData.lastClick > 2000) {
-        clickData.count = 0
-      }
-      
-      clickData.count++
-      clickData.lastClick = now
-      
-      setPlayerClickCounts({
-        ...playerClickCounts,
-        [player.id]: clickData
-      })
-      
-      // If 5 clicks within 2 seconds, trigger worst hand
-      if (clickData.count >= 5) {
-        // Flash screen
-        setScreenFlash(true)
-        setTimeout(() => setScreenFlash(false), 500)
-        
-        // Reset count
-        setPlayerClickCounts({
-          ...playerClickCounts,
-          [player.id]: { count: 0, lastClick: 0 }
-        })
-        
-        // Send to server
-        socket.emit('giveWorstHand', {
-          roomCode: roomCode,
-          targetPlayerId: player.id
-        }, (response) => {
-          if (response?.error) {
-            console.error('[RoomLobby] Worst hand error:', response.error)
-          }
-        })
-      }
-    }
     
     return (
       <div 
         ref={setNodeRef} 
-        onClick={handlePlayerClick}
         style={{
           ...styles.playerItem,
           ...(isBot ? styles.botPlayerItem : {}),
-          ...style,
-          cursor: isHostEffective && !isMe && gameState?.status === 'PLAYING' ? 'pointer' : style.cursor
+          ...style
         }}
         {...attributes}
       >
@@ -627,21 +570,6 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
   if (roomCode) {
     return (
       <div style={styles.container}>
-        {/* Screen flash overlay for easter egg */}
-        {screenFlash && (
-          <div style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: '#ff00ff',
-            opacity: 0.7,
-            zIndex: 10000,
-            pointerEvents: 'none',
-            animation: 'screenFlash 0.5s ease-out'
-          }} />
-        )}
         <div style={styles.card}>
           <h1 style={styles.title}>Ringo</h1>
           <div style={styles.roomInfo}>
