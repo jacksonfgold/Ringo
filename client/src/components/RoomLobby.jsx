@@ -30,6 +30,13 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
   })
 
   const [copyFeedback, setCopyFeedback] = useState(false)
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768)
+  
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 768)
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
   
   // Drag and drop sensors
   const sensors = useSensors(
@@ -569,8 +576,14 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
 
   if (roomCode) {
     return (
-      <div style={styles.container}>
-        <div style={styles.card}>
+      <div style={{
+        ...styles.container,
+        ...(isMobile ? { padding: 'max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left))', alignItems: 'flex-start' } : {})
+      }}>
+        <div style={{
+          ...styles.card,
+          ...(isMobile ? { padding: '24px 16px', margin: 'max(16px, env(safe-area-inset-top)) 0 max(16px, env(safe-area-inset-bottom))', maxHeight: 'calc(100vh - 32px)', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } : {})
+        }}>
           <h1 style={styles.title}>Ringo</h1>
           <div style={styles.roomInfo}>
             <div style={styles.headerSection}>
@@ -593,7 +606,7 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
               </div>
               <button 
                 onClick={handleLeaveRoom}
-                style={styles.secondaryButton}
+                style={{ ...styles.secondaryButton, ...(isMobile ? { minHeight: 44, padding: '12px 20px' } : {}) }}
               >
                 Leave Room
               </button>
@@ -628,7 +641,7 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
                 <div style={styles.addBotSection}>
                   <button 
                     onClick={() => setShowBotMenu(!showBotMenu)}
-                    style={styles.addBotButton}
+                    style={{ ...styles.addBotButton, ...(isMobile ? { minHeight: 44, padding: '14px 20px' } : {}) }}
                   >
                     🤖 Add Bot
                   </button>
@@ -695,7 +708,7 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
             {(isHostEffective || !effectiveHostId) && gameState?.status === 'GAME_OVER' && (
               <button
                 onClick={handleStartGame}
-                style={styles.playAgainButton}
+                style={{ ...styles.playAgainButton, ...(isMobile ? { minHeight: 48, padding: '16px 24px' } : {}) }}
               >
                 Play Again
               </button>
@@ -704,7 +717,7 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
             {isHostEffective && uniquePlayers.length >= 2 && gameState?.status !== 'GAME_OVER' && (
               <button
                 onClick={handleStartGame}
-                style={styles.startButton}
+                style={{ ...styles.startButton, ...(isMobile ? { minHeight: 48, padding: '16px 24px' } : {}) }}
               >
                 Start Game
               </button>
@@ -720,7 +733,7 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
             {isHostEffective && gameState?.status !== 'PLAYING' && (
               <button
                 onClick={() => setShowSettings(!showSettings)}
-                style={styles.settingsButton}
+                style={{ ...styles.settingsButton, ...(isMobile ? { minHeight: 44, padding: '12px 20px' } : {}) }}
               >
                 ⚙️ Game Settings
               </button>
@@ -810,10 +823,16 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
   }
 
   return (
-    <div style={styles.container}>
-      <div style={styles.card}>
-        <h1 style={styles.title}>Ringo</h1>
-        <p style={styles.subtitle}>Strategy Card Game</p>
+    <div style={{
+      ...styles.container,
+      ...(isMobile ? { padding: 'max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left))' } : {})
+    }}>
+      <div style={{
+        ...styles.card,
+        ...(isMobile ? { padding: '24px 16px', maxHeight: 'calc(100vh - 32px)', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } : {})
+      }}>
+        <h1 style={{ ...styles.title, ...(isMobile ? { fontSize: 36 } : {}) }}>Ringo</h1>
+        <p style={{ ...styles.subtitle, ...(isMobile ? { fontSize: 16 } : {}) }}>Strategy Card Game</p>
 
         <button 
           onClick={() => setShowRules(true)}
@@ -858,7 +877,7 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
           <div style={styles.createSection}>
             <button
               onClick={handleCreateRoom}
-              style={styles.createButton}
+              style={{ ...styles.createButton, ...(isMobile ? { minHeight: 48, padding: '16px' } : {}) }}
               disabled={!playerName.trim()}
             >
               Create Room
@@ -881,7 +900,7 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
             />
             <button
               onClick={handleJoinRoom}
-              style={styles.joinButton}
+              style={{ ...styles.joinButton, ...(isMobile ? { minHeight: 48, padding: '16px' } : {}) }}
               disabled={!joinCode.trim() || !playerName.trim()}
             >
               Join Room
@@ -891,15 +910,21 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
       </div>
 
       {showRules && (
-        <div style={styles.modalOverlay} onClick={(e) => {
+        <div style={{
+          ...styles.modalOverlay,
+          ...(isMobile ? { padding: 'env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)', alignItems: 'flex-end' } : {})
+        }} onClick={(e) => {
           if (e.target === e.currentTarget) setShowRules(false)
         }}>
-          <div style={styles.modalContent}>
+          <div style={{
+            ...styles.modalContent,
+            ...(isMobile ? { maxHeight: '90vh', overflowY: 'auto', WebkitOverflowScrolling: 'touch', margin: '0 16px 16px', width: 'calc(100% - 32px)' } : {})
+          }}>
             <div style={styles.modalHeader}>
-              <h2 style={styles.modalTitle}>How to Play Ringo</h2>
+              <h2 style={{ ...styles.modalTitle, ...(isMobile ? { fontSize: 22 } : {}) }}>How to Play Ringo</h2>
               <button 
                 onClick={() => setShowRules(false)}
-                style={styles.closeButton}
+                style={{ ...styles.closeButton, ...(isMobile ? { minWidth: 44, minHeight: 44 } : {}) }}
               >
                 ✕
               </button>
@@ -1109,6 +1134,8 @@ const styles = {
     justifyContent: 'center',
     borderRadius: '8px',
     transition: 'all 0.2s',
+    minWidth: 44,
+    minHeight: 44,
     ':hover': {
       background: '#eee'
     }

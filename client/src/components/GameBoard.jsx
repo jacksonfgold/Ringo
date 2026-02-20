@@ -84,6 +84,12 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
     }
     return false
   })
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth < 768
+    }
+    return false
+  })
   const [ringoShake, setRingoShake] = useState(false)
   const [botThinking, setBotThinking] = useState(false)
 
@@ -95,8 +101,8 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
   })
   const touchSensor = useSensor(TouchSensor, {
     activationConstraint: {
-      delay: 250, // Slight delay for touch to differentiate tap/scroll vs drag
-      tolerance: 5,
+      delay: 150, // Shorter delay for snappier touch; distance still differentiates tap vs drag
+      tolerance: 8,
     },
   })
   const sensors = useSensors(mouseSensor, touchSensor)
@@ -328,6 +334,7 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
   useEffect(() => {
     const handleResize = () => {
       setIsDesktop(window.innerWidth >= 1024)
+      setIsMobile(window.innerWidth < 768)
     }
     window.addEventListener('resize', handleResize)
     return () => window.removeEventListener('resize', handleResize)
@@ -720,8 +727,14 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
     const isWinner = gameState.winner === socket.id
     
     return (
-      <div style={styles.gameOverContainer}>
-        <div style={styles.gameOverCard}>
+      <div style={{
+        ...styles.gameOverContainer,
+        ...(isMobile ? { padding: 'max(20px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left))', alignItems: 'flex-start' } : {})
+      }}>
+        <div style={{
+          ...styles.gameOverCard,
+          ...(isMobile ? { padding: '24px 16px', margin: 'max(20px, env(safe-area-inset-top)) 0 max(20px, env(safe-area-inset-bottom))', maxHeight: 'calc(100vh - 40px)', overflowY: 'auto' } : {})
+        }}>
           <h1 style={styles.gameOverTitle}>{isWinner ? '🎉 You Win! 🎉' : `${winner?.name || 'Player'} Wins!`}</h1>
           <p style={styles.gameOverSubtitle}>
             {isWinner ? 'Congratulations! You emptied your hand!' : 'Better luck next time!'}
@@ -747,10 +760,9 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
 
           <button
             onClick={() => {
-              // Just hide the game view, don't clear room data
               if (onGoHome) onGoHome()
             }}
-            style={styles.gameOverButton}
+            style={{ ...styles.gameOverButton, ...(isMobile ? { minHeight: 48, padding: '16px 24px', fontSize: 18 } : {}) }}
           >
             Return to Lobby
           </button>
@@ -816,7 +828,8 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
           ...styles.container,
           ...(isMyTurn ? styles.activeContainer : {}),
           ...(isDesktop ? styles.desktopContainer : {}),
-          ...(ringoShake ? styles.ringoShakeContainer : {})
+          ...(ringoShake ? styles.ringoShakeContainer : {}),
+          ...(isMobile ? { paddingLeft: 'max(12px, env(safe-area-inset-left, 0px))', paddingRight: 'max(12px, env(safe-area-inset-right, 0px))' } : {})
         }} 
         onClick={(e) => {
         // Only trigger if clicking the background directly
@@ -839,7 +852,10 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
         )}
         <button
           onClick={onGoHome}
-          style={styles.homeButton}
+          style={{
+            ...styles.homeButton,
+            ...(isMobile ? { top: 'max(12px, env(safe-area-inset-top, 0px))', left: 'max(12px, env(safe-area-inset-left, 0px))', padding: '10px 16px', minHeight: 44 } : {})
+          }}
         >
           ← Home
         </button>
@@ -849,7 +865,10 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
             localStorage.setItem('ringo_soundEnabled', enabled.toString())
             setSoundEnabled(enabled)
           }}
-          style={styles.soundToggleButton}
+          style={{
+            ...styles.soundToggleButton,
+            ...(isMobile ? { top: 'max(12px, env(safe-area-inset-top, 0px))', right: 'max(12px, env(safe-area-inset-right, 0px))', padding: '10px 14px', minHeight: 44, minWidth: 44 } : {})
+          }}
           title={soundEnabled ? 'Sound On' : 'Sound Off'}
         >
           {soundEnabled ? '🔊' : '🔇'}
@@ -873,9 +892,9 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
             </div>
           )} */}
 
-          <div style={styles.gameArea}>
+          <div style={{ ...styles.gameArea, ...(isMobile ? { overflowY: 'auto', WebkitOverflowScrolling: 'touch', flex: '1 1 auto', minHeight: 0 } : {}) }}>
           {/* Players */}
-          <div style={styles.otherPlayers}>
+          <div style={{ ...styles.otherPlayers, ...(isMobile ? { gap: 8, padding: '8px 4px' } : {}) }}>
             {(gameState?.players?.length ? gameState.players : roomPlayers).map((player, index) => {
               const isActive = gameState?.currentPlayerIndex === index
               const handSize = player.handSize ?? player.hand?.length ?? 0
@@ -1037,7 +1056,7 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
 
           {/* Drawn Card (Inline) */}
           {drawnCard && (
-            <div style={styles.drawnCardSection}>
+            <div style={{ ...styles.drawnCardSection, ...(isMobile ? { padding: '16px 12px', margin: '0 auto', maxWidth: '100%' } : {}) }}>
               <div style={styles.drawnCardLabel}>Drawn Card</div>
               <DraggableCard 
                 id="drawn-card" 
@@ -1201,7 +1220,8 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
               </div>
               <div style={{
                 ...styles.hand,
-                ...(ringoMode ? styles.ringoHand : {})
+                ...(ringoMode ? styles.ringoHand : {}),
+                ...(isMobile ? { paddingBottom: 'max(100px, calc(80px + env(safe-area-inset-bottom, 0px)))', padding: '16px 12px', gap: 6 } : {})
               }} onClick={(e) => {
                if (e.target === e.currentTarget && selectedCards.length > 0) {
                  setSelectedCards([])
@@ -1213,8 +1233,8 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
                     id="hand-gap-0"
                     style={{
                       ...styles.insertSlot,
-                    width: activeDragId && (activeDragId === 'drawn-card' || activeDragId.startsWith('capture-')) ? '40px' : '28px',
-                    height: activeDragId && (activeDragId === 'drawn-card' || activeDragId.startsWith('capture-')) ? '90px' : '28px',
+                    width: activeDragId && (activeDragId === 'drawn-card' || activeDragId.startsWith('capture-')) ? (isMobile ? '44px' : '40px') : (isMobile ? '44px' : '28px'),
+                    height: activeDragId && (activeDragId === 'drawn-card' || activeDragId.startsWith('capture-')) ? (isMobile ? '72px' : '90px') : (isMobile ? '44px' : '28px'),
                     borderRadius: activeDragId && (activeDragId === 'drawn-card' || activeDragId.startsWith('capture-')) ? '8px' : '50%',
                       transition: 'all 0.2s',
                       opacity: (insertingCard || insertingCapture !== null) ? 1 : (activeDragId ? 0.5 : 0),
@@ -1249,11 +1269,13 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
                     ? `linear-gradient(to right, ${getCardColor(card.splitValues[0])} 0%, ${getCardColor(card.splitValues[0])} 50%, ${getCardColor(card.splitValues[1])} 50%, ${getCardColor(card.splitValues[1])} 100%)`
                     : getCardColor(card.value)
                   
+                  const baseCardSize = isMobile ? { width: 48, height: 72, fontSize: 20 } : {}
                   const CardContent = (
                     <div
                       onClick={() => !insertingCard && insertingCapture === null && handleCardClick(index)}
                       style={{
                         ...styles.card,
+                        ...baseCardSize,
                         background: cardColor,
                         color: 'white',
                         cursor: insertingCard || insertingCapture !== null ? 'default' : 'pointer',
@@ -1286,8 +1308,8 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
                           id={`hand-gap-${index + 1}`}
                           style={{
                             ...styles.insertSlot,
-                            width: activeDragId && (activeDragId === 'drawn-card' || activeDragId.startsWith('capture-')) ? '40px' : '28px',
-                            height: activeDragId && (activeDragId === 'drawn-card' || activeDragId.startsWith('capture-')) ? '90px' : '28px',
+                            width: activeDragId && (activeDragId === 'drawn-card' || activeDragId.startsWith('capture-')) ? (isMobile ? '44px' : '40px') : (isMobile ? '44px' : '28px'),
+                            height: activeDragId && (activeDragId === 'drawn-card' || activeDragId.startsWith('capture-')) ? (isMobile ? '72px' : '90px') : (isMobile ? '44px' : '28px'),
                             borderRadius: activeDragId && (activeDragId === 'drawn-card' || activeDragId.startsWith('capture-')) ? '8px' : '50%',
                             transition: 'all 0.2s',
                             opacity: (insertingCard || insertingCapture !== null) ? 1 : (activeDragId ? 0.5 : 0),
@@ -1331,16 +1353,25 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
            gameState.turnPhase === 'WAITING_FOR_PLAY_OR_DRAW' && 
            !drawnCard && 
            myPlayerIndex !== -1 && (
-            <div style={styles.controlBar}>
+            <div style={{
+              ...styles.controlBar,
+              ...(isMobile ? {
+                bottom: 'max(16px, env(safe-area-inset-bottom, 0px))',
+                paddingBottom: 'max(16px, env(safe-area-inset-bottom, 0px))',
+                padding: '14px 16px',
+                minWidth: '90%',
+                gap: 14
+              } : {})
+            }}>
               {selectedCards.length > 0 ? (
                 <button
                   onClick={handlePlay}
-                  style={styles.playButton}
+                  style={{ ...styles.playButton, ...(isMobile ? { minHeight: 44, padding: '14px 24px', fontSize: 16 } : {}) }}
                 >
                   Play {selectedCards.length} Card{selectedCards.length !== 1 ? 's' : ''}
                 </button>
               ) : (
-                <button onClick={handleDraw} style={styles.drawButton}>
+                <button onClick={handleDraw} style={{ ...styles.drawButton, ...(isMobile ? { minHeight: 44, padding: '14px 24px', fontSize: 16 } : {}) }}>
                   Draw Card
                 </button>
               )}

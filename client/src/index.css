@@ -64,16 +64,46 @@ input:focus {
   border-color: #667eea;
 }
 
+/* Safe area insets for notched devices (e.g. iPhone) */
+.safe-area-top {
+  padding-top: env(safe-area-inset-top, 0);
+}
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+.safe-area-left {
+  padding-left: env(safe-area-inset-left, 0);
+}
+.safe-area-right {
+  padding-right: env(safe-area-inset-right, 0);
+}
+.safe-area-horizontal {
+  padding-left: env(safe-area-inset-left, 0);
+  padding-right: env(safe-area-inset-right, 0);
+}
+
 /* Mobile-first responsive adjustments */
 @media (max-width: 480px) {
   button {
     padding: 14px 20px;
     font-size: 16px;
+    min-height: 44px; /* Touch target */
   }
 
   input {
     font-size: 16px; /* Prevents zoom on iOS */
     padding: 14px;
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 768px) {
+  body {
+    padding-left: env(safe-area-inset-left, 0);
+    padding-right: env(safe-area-inset-right, 0);
+  }
+  button {
+    min-height: 44px;
   }
 }
 
