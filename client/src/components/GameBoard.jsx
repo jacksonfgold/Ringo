@@ -1637,8 +1637,7 @@ const styles = {
     animation: 'float 3s ease-in-out infinite, glow 2s ease-in-out infinite',
     overflow: 'hidden',
     border: '2px solid rgba(255, 255, 255, 0.3)',
-    backdropFilter: 'blur(10px)',
-    position: 'relative'
+    backdropFilter: 'blur(10px)'
   },
   turnIndicatorBadgeContent: {
     position: 'relative',
@@ -1954,11 +1953,10 @@ const styles = {
     fontSize: '16px',
     color: 'rgba(255,255,255,0.8)',
     fontWeight: 'bold',
-    margin: '0',
+    margin: '4px 0',
     height: '2px',
     width: '70%',
-    background: 'rgba(255,255,255,0.5)',
-    margin: '4px 0'
+    background: 'rgba(255,255,255,0.5)'
   },
   drawnCardSection: {
     background: 'rgba(255, 255, 255, 0.95)',

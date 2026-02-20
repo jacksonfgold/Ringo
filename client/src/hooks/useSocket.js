@@ -13,6 +13,10 @@ export function useSocket() {
   const socketRef = useRef(null)
   const hasAttemptedRejoin = useRef(false)
   const hasLoadedFromStorage = useRef(false)
+  const ignoreGameStateUpdates = useRef(false)
+  // Once user clicks "Return to Lobby", ignore all game state updates for the current game
+  // until a new game starts (isNewGame + PLAYING). Prevents being pushed back to game view.
+  const userReturnedToLobby = useRef(false)
 
   // Load saved state from localStorage ONCE on mount
   useEffect(() => {
@@ -146,6 +150,7 @@ export function useSocket() {
 
     newSocket.on('roomClosed', (data) => {
       console.log('[useSocket] Room closed event received:', data)
+      userReturnedToLobby.current = false
       // Clear all room-related state
       clearSavedState()
       setRoomClosedError(data.reason || 'Room has been closed')
@@ -163,16 +168,36 @@ export function useSocket() {
     newSocket.on('gameStateUpdate', (data) => {
       console.log('[useSocket] Game state update received:', data)
       console.log('[useSocket] Current socket ID:', newSocket.id)
+      
+      // Ignore all updates while temporarily ignoring (first moment after return to lobby)
+      if (ignoreGameStateUpdates.current) {
+        console.log('[useSocket] Ignoring gameStateUpdate - returning to lobby')
+        return
+      }
+      
+      // User chose "Return to Lobby": only accept updates for a *new* game, not the same/ended game
+      if (userReturnedToLobby.current) {
+        if (data.isNewGame && data.gameState?.status === 'PLAYING') {
+          console.log('[useSocket] New game started - accepting update and clearing return-to-lobby flag')
+          userReturnedToLobby.current = false
+          localStorage.removeItem('ringo_gameState')
+          setGameState(data.gameState)
+          if (data.gameState.hostId) setRoomHostId(data.gameState.hostId)
+        } else {
+          console.log('[useSocket] Ignoring gameStateUpdate - user is viewing lobby (same/ended game)')
+          return
+        }
+        return
+      }
+      
       if (data.gameState) {
         console.log('[useSocket] Players in game state:', data.gameState.players?.map(p => ({ id: p.id, name: p.name, hasHand: !!p.hand })))
         console.log('[useSocket] Current player index:', data.gameState.currentPlayerIndex)
         console.log('[useSocket] My player index:', data.gameState.players?.findIndex(p => p.id === newSocket.id))
         console.log('[useSocket] Is my turn?', data.gameState.currentPlayerIndex === data.gameState.players?.findIndex(p => p.id === newSocket.id))
         
-        // If this is a new game (status is PLAYING and isNewGame flag is set), ensure clean state
         if (data.isNewGame && data.gameState.status === 'PLAYING') {
           console.log('[useSocket] New game detected - ensuring clean state')
-          // Clear any stale localStorage state
           localStorage.removeItem('ringo_gameState')
         }
         
@@ -252,6 +277,7 @@ export function useSocket() {
   }, [connected, socket])
 
   const clearSavedState = () => {
+    userReturnedToLobby.current = false
     // Clear all localStorage items
     localStorage.removeItem('ringo_roomCode')
     localStorage.removeItem('ringo_playerName')
@@ -268,6 +294,20 @@ export function useSocket() {
     console.log('[useSocket] Cleared all saved state and game data')
   }
 
+  // Call when user clicks "Return to Lobby": ignore same-game updates until a new game starts
+  const signalReturnToLobby = () => {
+    userReturnedToLobby.current = true
+    ignoreGameStateUpdates.current = true
+    // Re-enable socket listener after a short delay so we still accept only new-game updates
+    setTimeout(() => {
+      ignoreGameStateUpdates.current = false
+    }, 800)
+  }
+
+  const setIgnoreGameStateUpdates = (ignore) => {
+    ignoreGameStateUpdates.current = ignore
+  }
+
   return {
     socket,
     connected,
@@ -281,6 +321,8 @@ export function useSocket() {
     setRoomCode,
     setPlayerName,
     setGameState,
-    clearSavedState
+    clearSavedState,
+    setIgnoreGameStateUpdates,
+    signalReturnToLobby
   }
 }

@@ -5,7 +5,7 @@ import GameBoard from './components/GameBoard'
 import { ToastContainer } from './components/Toast'
 
 function App() {
-  const { socket, connected, gameState, roomPlayers, roomCode, roomHostId, setRoomCode, setPlayerName, clearSavedState, setGameState, roomClosedError, setRoomClosedError } = useSocket()
+  const { socket, connected, gameState, roomPlayers, roomCode, roomHostId, setRoomCode, setPlayerName, clearSavedState, setGameState, roomClosedError, setRoomClosedError, signalReturnToLobby } = useSocket()
   const [connectionTimeout, setConnectionTimeout] = useState(false)
   const [showGame, setShowGame] = useState(false)
   const [returningToLobby, setReturningToLobby] = useState(false)
@@ -30,13 +30,11 @@ function App() {
   const handleGoHome = () => {
     setReturningToLobby(true)
     setShowGame(false)
-    // Clear gameState when returning to lobby so the winning screen doesn't persist
+    // Tell socket to ignore same-game updates until a new game starts (stays in lobby)
+    if (signalReturnToLobby) signalReturnToLobby()
     setGameState(null)
-    // Reset the flag after a delay to allow state to settle and prevent race conditions
-    // This prevents incoming gameStateUpdate events from re-showing the game
-    setTimeout(() => {
-      setReturningToLobby(false)
-    }, 500)
+    localStorage.removeItem('ringo_gameState')
+    setTimeout(() => setReturningToLobby(false), 600)
   }
 
   useEffect(() => {
