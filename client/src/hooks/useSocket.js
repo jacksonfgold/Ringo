@@ -21,6 +21,11 @@ export function useSocket() {
   // until a new game starts (isNewGame + PLAYING). Prevents being pushed back to game view.
   const userReturnedToLobby = useRef(false)
 
+  // Clear only saved game state (between games or when leaving game view). Keeps roomCode/playerName.
+  const clearLocalGameState = () => {
+    localStorage.removeItem('ringo_gameState')
+  }
+
   // Load saved state from localStorage ONCE on mount
   useEffect(() => {
     const savedRoomCode = localStorage.getItem('ringo_roomCode')
@@ -167,12 +172,10 @@ export function useSocket() {
     })
 
     newSocket.on('gameStateReset', () => {
-      console.log('[useSocket] Game state reset signal received - clearing flags and storage (keep state until new game arrives)')
+      console.log('[useSocket] Game state reset - clearing saved game state between games')
       userReturnedToLobby.current = false
-      localStorage.removeItem('ringo_gameState')
-      // Do NOT set gameState(null) here - the next gameStateUpdate will replace it.
-      // Clearing here caused the client to switch to lobby; if the update was delayed or
-      // sent to a stale socket id, the new game never appeared.
+      clearLocalGameState()
+      // Do NOT setGameState(null) here - the next gameStateUpdate will replace it.
     })
 
     newSocket.on('gameStateUpdate', (data) => {
@@ -190,7 +193,7 @@ export function useSocket() {
         if (data.isNewGame && data.gameState?.status === 'PLAYING') {
           console.log('[useSocket] New game started - accepting update and clearing return-to-lobby flag')
           userReturnedToLobby.current = false
-          localStorage.removeItem('ringo_gameState')
+          clearLocalGameState()
           setGameState(data.gameState)
           if (data.gameState.hostId) setRoomHostId(data.gameState.hostId)
         } else {
@@ -207,8 +210,8 @@ export function useSocket() {
         console.log('[useSocket] Is my turn?', data.gameState.currentPlayerIndex === data.gameState.players?.findIndex(p => p.id === newSocket.id))
         
         if (data.isNewGame && data.gameState.status === 'PLAYING') {
-          console.log('[useSocket] New game detected - ensuring clean state')
-          localStorage.removeItem('ringo_gameState')
+          console.log('[useSocket] New game detected - clearing saved game state between games')
+          clearLocalGameState()
         }
         
         setGameState(data.gameState)
@@ -312,10 +315,9 @@ export function useSocket() {
     hasSyncedSocketInLobby.current = false
     setIsSpectator(false)
     setRoomSpectators([])
-    // Clear all localStorage items
+    clearLocalGameState()
     localStorage.removeItem('ringo_roomCode')
     localStorage.removeItem('ringo_playerName')
-    localStorage.removeItem('ringo_gameState')
     
     // Clear all state
     setRoomCode(null)
@@ -360,6 +362,7 @@ export function useSocket() {
     setIsSpectator,
     setRoomSpectators,
     clearSavedState,
+    clearLocalGameState,
     setIgnoreGameStateUpdates,
     signalReturnToLobby
   }

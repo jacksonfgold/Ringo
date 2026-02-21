@@ -74,10 +74,8 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
   useEffect(() => {
     if (!socket) return
 
-    socket.on('roomUpdate', (data) => {
+    const onRoomUpdate = (data) => {
       console.log('[RoomLobby] roomUpdate received:', data)
-      // Always update players from roomUpdate - this is the source of truth
-      // Update even if empty array to clear stale data
       if (data.players && Array.isArray(data.players)) {
         setPlayers(data.players)
         console.log('[RoomLobby] Updated players list:', data.players.map(p => ({ id: p.id, name: p.name, isBot: p.isBot })))
@@ -89,16 +87,16 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
         setHostId(data.hostId)
         setIsHost(socket.id === data.hostId)
       }
-    })
+    }
 
-    socket.on('roomSettingsUpdate', (data) => {
+    const onRoomSettingsUpdate = (data) => {
       console.log('[RoomLobby] roomSettingsUpdate received:', data)
       if (data.settings) {
         setGameSettings(data.settings)
       }
-    })
+    }
 
-    socket.on('roomClosed', (data) => {
+    const onRoomClosed = (data) => {
       console.log('[RoomLobby] Room closed event received:', data)
       setRoomCode('')
       setPlayers([])
@@ -106,11 +104,16 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
       setHostId(null)
       if (clearSavedState) clearSavedState()
       if (setRoomClosedError) setRoomClosedError(data.reason || 'Room has been closed')
-    })
+    }
+
+    socket.on('roomUpdate', onRoomUpdate)
+    socket.on('roomSettingsUpdate', onRoomSettingsUpdate)
+    socket.on('roomClosed', onRoomClosed)
 
     return () => {
-      socket.off('roomUpdate')
-      socket.off('roomClosed')
+      socket.off('roomUpdate', onRoomUpdate)
+      socket.off('roomSettingsUpdate', onRoomSettingsUpdate)
+      socket.off('roomClosed', onRoomClosed)
     }
   }, [socket, clearSavedState, setRoomClosedError])
 

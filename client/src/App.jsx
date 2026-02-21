@@ -5,7 +5,7 @@ import GameBoard from './components/GameBoard'
 import { ToastContainer } from './components/Toast'
 
 function App() {
-  const { socket, connected, gameState, roomPlayers, roomCode, roomHostId, setRoomCode, setPlayerName, clearSavedState, setGameState, roomClosedError, setRoomClosedError, signalReturnToLobby, isSpectator, setIsSpectator, setRoomSpectators, roomSpectators } = useSocket()
+  const { socket, connected, gameState, roomPlayers, roomCode, roomHostId, setRoomCode, setPlayerName, clearSavedState, clearLocalGameState, setGameState, roomClosedError, setRoomClosedError, signalReturnToLobby, isSpectator, setIsSpectator, setRoomSpectators, roomSpectators } = useSocket()
   const [connectionTimeout, setConnectionTimeout] = useState(false)
   const [showGame, setShowGame] = useState(false)
   const [returningToLobby, setReturningToLobby] = useState(false)
@@ -26,10 +26,9 @@ function App() {
   const handleGoHome = () => {
     setReturningToLobby(true)
     setShowGame(false)
-    // Tell socket to ignore same-game updates until a new game starts (stays in lobby)
     if (signalReturnToLobby) signalReturnToLobby()
     setGameState(null)
-    localStorage.removeItem('ringo_gameState')
+    if (clearLocalGameState) clearLocalGameState()
     setTimeout(() => setReturningToLobby(false), 600)
   }
 
