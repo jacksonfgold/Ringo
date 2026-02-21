@@ -16,6 +16,7 @@ export function useSocket() {
   const hasAttemptedRejoin = useRef(false)
   const hasLoadedFromStorage = useRef(false)
   const ignoreGameStateUpdates = useRef(false)
+  const hasSyncedSocketInLobby = useRef(false)
   // Once user clicks "Return to Lobby", ignore all game state updates for the current game
   // until a new game starts (isNewGame + PLAYING). Prevents being pushed back to game view.
   const userReturnedToLobby = useRef(false)
@@ -123,6 +124,7 @@ export function useSocket() {
       console.log('Disconnected from server:', reason)
       setConnected(false)
       hasAttemptedRejoin.current = false
+      hasSyncedSocketInLobby.current = false
       // Don't reset gameState on disconnect - allow reconnection
     })
 
@@ -165,10 +167,12 @@ export function useSocket() {
     })
 
     newSocket.on('gameStateReset', () => {
-      console.log('[useSocket] Game state reset signal received - clearing old state')
+      console.log('[useSocket] Game state reset signal received - clearing flags and storage (keep state until new game arrives)')
       userReturnedToLobby.current = false
-      setGameState(null)
       localStorage.removeItem('ringo_gameState')
+      // Do NOT set gameState(null) here - the next gameStateUpdate will replace it.
+      // Clearing here caused the client to switch to lobby; if the update was delayed or
+      // sent to a stale socket id, the new game never appeared.
     })
 
     newSocket.on('gameStateUpdate', (data) => {
@@ -282,8 +286,30 @@ export function useSocket() {
     })
   }, [connected, socket])
 
+  // When we're in a room (lobby) and connected, sync our socket id with the server so we
+  // receive game start and other events (e.g. after reconnect, or when host starts a new game).
+  useEffect(() => {
+    if (!connected || !socket || !roomCode || !playerName) {
+      if (!roomCode) hasSyncedSocketInLobby.current = false
+      return
+    }
+    if (hasSyncedSocketInLobby.current) return
+    hasSyncedSocketInLobby.current = true
+    console.log('[useSocket] Syncing socket id with room (rejoin for lobby)', roomCode)
+    socket.emit('rejoinRoom', { roomCode, playerName: playerName || 'Player' }, (response) => {
+      if (response?.success) {
+        console.log('[useSocket] Lobby sync rejoin OK')
+        if (response.players) setRoomPlayers(response.players)
+        if (response.gameState) setGameState(response.gameState)
+      } else {
+        hasSyncedSocketInLobby.current = false
+      }
+    })
+  }, [connected, socket, roomCode, playerName])
+
   const clearSavedState = () => {
     userReturnedToLobby.current = false
+    hasSyncedSocketInLobby.current = false
     setIsSpectator(false)
     setRoomSpectators([])
     // Clear all localStorage items

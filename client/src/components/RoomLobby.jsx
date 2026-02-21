@@ -1007,7 +1007,7 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
                 <h3 style={styles.ruleTitle}>Special Rules</h3>
                 <ul style={styles.ruleList}>
                   <li>
-                    <strong>Split Cards:</strong> Cards like 5/6 can count as either value.
+                    <strong>Split Cards:</strong> Cards like 1/2, 3/4, 5/6, 7/8 can count as either value.
                   </li>
                   <li>
                     <strong>Closing a Pile:</strong> If play returns to you and no one has beaten your combo, the pile is discarded and you start a new one freely.

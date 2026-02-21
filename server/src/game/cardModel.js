@@ -48,15 +48,13 @@ export function createDeck() {
     }
   })
 
-  // Split cards (5/6) - 8 split cards total
-  deck.push(new Card(cardId++, 5, true, [5, 6]))
-  deck.push(new Card(cardId++, 5, true, [5, 6]))
-  deck.push(new Card(cardId++, 5, true, [5, 6]))
-  deck.push(new Card(cardId++, 5, true, [5, 6]))
-  deck.push(new Card(cardId++, 6, true, [5, 6]))
-  deck.push(new Card(cardId++, 6, true, [5, 6]))
-  deck.push(new Card(cardId++, 6, true, [5, 6]))
-  deck.push(new Card(cardId++, 6, true, [5, 6]))
+  // Split cards: 2 of each 1/2, 3/4, 5/6, 7/8 (8 total) — colors from getCardColor per value
+  const splitPairs = [[1, 2], [3, 4], [5, 6], [7, 8]]
+  for (const [low, high] of splitPairs) {
+    for (let i = 0; i < 2; i++) {
+      deck.push(new Card(cardId++, low, true, [low, high]))
+    }
+  }
 
   return shuffleDeck(deck)
 }
