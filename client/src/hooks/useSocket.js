@@ -166,7 +166,7 @@ export function useSocket() {
 
     newSocket.on('gameStateReset', () => {
       console.log('[useSocket] Game state reset signal received - clearing old state')
-      // Clear game state and localStorage before new game starts
+      userReturnedToLobby.current = false
       setGameState(null)
       localStorage.removeItem('ringo_gameState')
     })

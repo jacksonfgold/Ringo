@@ -11,20 +11,16 @@ function App() {
   const [returningToLobby, setReturningToLobby] = useState(false)
 
   useEffect(() => {
-    // If we're returning to lobby, don't show game even if gameState exists
-    if (returningToLobby) {
-      setShowGame(false)
+    // When we have an active game (playing or just ended), always show the game and clear
+    // "returning to lobby" so that if a new game starts while someone is in the lobby,
+    // they get brought into the new game.
+    if (gameState?.status === 'PLAYING' || gameState?.status === 'GAME_OVER') {
+      setReturningToLobby(false)
+      setShowGame(true)
       return
     }
-    
-    // Show game while playing or if game just ended
-    if (gameState?.status === 'PLAYING' || gameState?.status === 'GAME_OVER') {
-      setShowGame(true)
-    } else {
-      // Hide game when status is not PLAYING or GAME_OVER
-      // But don't clear room data - user should stay in lobby
-      setShowGame(false)
-    }
+    // Otherwise show lobby (e.g. user clicked Return to Lobby or no game in progress)
+    setShowGame(false)
   }, [gameState, returningToLobby])
 
   const handleGoHome = () => {
