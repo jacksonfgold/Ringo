@@ -10,6 +10,8 @@ export function useSocket() {
   const [playerName, setPlayerName] = useState(null)
   const [roomHostId, setRoomHostId] = useState(null)
   const [roomClosedError, setRoomClosedError] = useState(null)
+  const [isSpectator, setIsSpectator] = useState(false)
+  const [roomSpectators, setRoomSpectators] = useState([])
   const socketRef = useRef(null)
   const hasAttemptedRejoin = useRef(false)
   const hasLoadedFromStorage = useRef(false)
@@ -138,10 +140,12 @@ export function useSocket() {
       if (data.roomCode) {
         setRoomCode(data.roomCode)
       }
-      // Always update players, even if empty array (to clear stale data)
       if (data.players !== undefined) {
         setRoomPlayers(data.players)
         console.log('[useSocket] Updated roomPlayers:', data.players.map(p => ({ id: p.id, name: p.name, isBot: p.isBot })))
+      }
+      if (data.spectators !== undefined) {
+        setRoomSpectators(data.spectators)
       }
       if (data.hostId !== undefined) {
         setRoomHostId(data.hostId)
@@ -151,6 +155,8 @@ export function useSocket() {
     newSocket.on('roomClosed', (data) => {
       console.log('[useSocket] Room closed event received:', data)
       userReturnedToLobby.current = false
+      setIsSpectator(false)
+      setRoomSpectators([])
       // Clear all room-related state
       clearSavedState()
       setRoomClosedError(data.reason || 'Room has been closed')
@@ -278,6 +284,8 @@ export function useSocket() {
 
   const clearSavedState = () => {
     userReturnedToLobby.current = false
+    setIsSpectator(false)
+    setRoomSpectators([])
     // Clear all localStorage items
     localStorage.removeItem('ringo_roomCode')
     localStorage.removeItem('ringo_playerName')
@@ -317,10 +325,14 @@ export function useSocket() {
     roomHostId,
     playerName,
     roomClosedError,
+    isSpectator,
+    roomSpectators,
     setRoomClosedError,
     setRoomCode,
     setPlayerName,
     setGameState,
+    setIsSpectator,
+    setRoomSpectators,
     clearSavedState,
     setIgnoreGameStateUpdates,
     signalReturnToLobby

@@ -5,7 +5,7 @@ import GameBoard from './components/GameBoard'
 import { ToastContainer } from './components/Toast'
 
 function App() {
-  const { socket, connected, gameState, roomPlayers, roomCode, roomHostId, setRoomCode, setPlayerName, clearSavedState, setGameState, roomClosedError, setRoomClosedError, signalReturnToLobby } = useSocket()
+  const { socket, connected, gameState, roomPlayers, roomCode, roomHostId, setRoomCode, setPlayerName, clearSavedState, setGameState, roomClosedError, setRoomClosedError, signalReturnToLobby, isSpectator, setIsSpectator, setRoomSpectators, roomSpectators } = useSocket()
   const [connectionTimeout, setConnectionTimeout] = useState(false)
   const [showGame, setShowGame] = useState(false)
   const [returningToLobby, setReturningToLobby] = useState(false)
@@ -87,12 +87,12 @@ function App() {
 
   // Only show game if showGame is true AND we're not returning to lobby
   if (showGame && !returningToLobby && (gameState?.status === 'PLAYING' || gameState?.status === 'GAME_OVER')) {
-    return <GameBoard socket={socket} gameState={gameState} roomCode={roomCode} roomPlayers={roomPlayers} onGoHome={handleGoHome} />
+    return <GameBoard socket={socket} gameState={gameState} roomCode={roomCode} roomPlayers={roomPlayers} onGoHome={handleGoHome} isSpectator={isSpectator} />
   }
 
   return (
     <>
-      <RoomLobby socket={socket} gameState={gameState} roomCode={roomCode} roomPlayers={roomPlayers} roomHostId={roomHostId} setRoomCode={setRoomCode} setPlayerName={setPlayerName} clearSavedState={clearSavedState} setGameState={setGameState} roomClosedError={roomClosedError} setRoomClosedError={setRoomClosedError} />
+      <RoomLobby socket={socket} gameState={gameState} roomCode={roomCode} roomPlayers={roomPlayers} roomHostId={roomHostId} setRoomCode={setRoomCode} setPlayerName={setPlayerName} clearSavedState={clearSavedState} setGameState={setGameState} roomClosedError={roomClosedError} setRoomClosedError={setRoomClosedError} setIsSpectator={setIsSpectator} setRoomSpectators={setRoomSpectators} roomSpectators={roomSpectators} />
       <ToastContainer />
     </>
   )

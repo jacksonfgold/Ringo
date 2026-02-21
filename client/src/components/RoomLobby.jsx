@@ -4,7 +4,7 @@ import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, v
 import { CSS } from '@dnd-kit/utilities'
 import { showToast } from './Toast'
 
-export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHostId = null, roomCode: initialRoomCode, setRoomCode: setRoomCodeProp, setPlayerName: setPlayerNameProp, clearSavedState, setGameState: setGameStateProp, roomClosedError, setRoomClosedError }) {
+export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHostId = null, roomCode: initialRoomCode, setRoomCode: setRoomCodeProp, setPlayerName: setPlayerNameProp, clearSavedState, setGameState: setGameStateProp, roomClosedError, setRoomClosedError, setIsSpectator, setRoomSpectators, roomSpectators = [] }) {
   const [roomCode, setRoomCode] = useState(initialRoomCode || '')
   const [joinCode, setJoinCode] = useState('')
   const [players, setPlayers] = useState([])
@@ -100,36 +100,12 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
 
     socket.on('roomClosed', (data) => {
       console.log('[RoomLobby] Room closed event received:', data)
-      // Clear room state
       setRoomCode('')
       setPlayers([])
       setIsHost(false)
       setHostId(null)
-      // Clear saved state if callback provided
-      if (clearSavedState) {
-        clearSavedState()
-      }
-      // Set error message
-      if (setRoomClosedError) {
-        setRoomClosedError(data.reason || 'Room has been closed')
-      }
-    })
-
-    socket.on('roomClosed', (data) => {
-      console.log('[RoomLobby] Room closed event received:', data)
-      // Clear room state
-      setRoomCode('')
-      setPlayers([])
-      setIsHost(false)
-      setHostId(null)
-      // Clear saved state if callback provided
-      if (clearSavedState) {
-        clearSavedState()
-      }
-      // Set error message
-      if (setRoomClosedError) {
-        setRoomClosedError(data.reason || 'Room has been closed')
-      }
+      if (clearSavedState) clearSavedState()
+      if (setRoomClosedError) setRoomClosedError(data.reason || 'Room has been closed')
     })
 
     return () => {
@@ -181,7 +157,7 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
 
   const handleCreateRoom = () => {
     if (!playerName.trim()) {
-      alert('Please enter your name')
+      showToast('Please enter your name', 'error')
       return
     }
 
@@ -195,18 +171,46 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
         setIsHost(socket.id === response.hostId)
         setShowNameInput(false)
       } else {
-        alert(response.error || 'Failed to create room')
+        showToast(response.error || 'Failed to create room', 'error')
+      }
+    })
+  }
+
+  const handleJoinAsSpectator = () => {
+    if (!playerName.trim()) {
+      showToast('Please enter your name', 'error')
+      return
+    }
+    if (!joinCode.trim()) {
+      showToast('Please enter a room code', 'error')
+      return
+    }
+    const code = joinCode.trim().toUpperCase()
+    socket.emit('joinAsSpectator', { roomCode: code, playerName: playerName.trim() }, (response) => {
+      if (response?.success) {
+        setRoomCode(code)
+        if (setRoomCodeProp) setRoomCodeProp(code)
+        setPlayerName(playerName.trim())
+        if (setPlayerNameProp) setPlayerNameProp(playerName.trim())
+        if (response.players) setPlayers(response.players)
+        if (setIsSpectator) setIsSpectator(true)
+        if (setRoomSpectators && response.spectators) setRoomSpectators(response.spectators)
+        if (setGameStateProp && response.gameState) setGameStateProp(response.gameState)
+        setShowNameInput(false)
+        showToast('Joined as spectator', 'success')
+      } else {
+        showToast(response?.error || 'Failed to join as spectator', 'error')
       }
     })
   }
 
   const handleJoinRoom = () => {
     if (!playerName.trim()) {
-      alert('Please enter your name')
+      showToast('Please enter your name', 'error')
       return
     }
     if (!joinCode.trim()) {
-      alert('Please enter a room code')
+      showToast('Please enter a room code', 'error')
       return
     }
 
@@ -265,7 +269,7 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
               if (joinResponse?.error === 'Room not found' || joinResponse?.error?.includes('not found')) {
                 if (clearSavedState) clearSavedState()
               }
-              alert(joinResponse.error || 'Failed to join room')
+              showToast(joinResponse.error || 'Failed to join room', 'error')
             }
           })
         }
@@ -291,7 +295,7 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
           if (response?.error === 'Room not found' || response?.error?.includes('not found')) {
             if (clearSavedState) clearSavedState()
           }
-          alert(response.error || 'Failed to join room')
+          showToast(response.error || 'Failed to join room', 'error')
         }
       })
     }
@@ -636,6 +640,17 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
                 </SortableContext>
               </DndContext>
               
+              {roomSpectators && roomSpectators.length > 0 && (
+                <div style={styles.spectatorsSection}>
+                  <div style={styles.spectatorsLabel}>Spectators ({roomSpectators.length})</div>
+                  <div style={styles.spectatorsList}>
+                    {roomSpectators.map(s => (
+                      <span key={s.id} style={styles.spectatorChip}>{s.name}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Add Bot Button */}
               {isHostEffective && uniquePlayers.length < 5 && gameState?.status !== 'PLAYING' && (
                 <div style={styles.addBotSection}>
@@ -748,18 +763,38 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
                   <label style={styles.settingLabel}>
                     Starting Hand Size
                   </label>
-                  <select
-                    value={gameSettings.handSize || 'auto'}
-                    onChange={(e) => handleUpdateSettings({ 
-                      handSize: e.target.value === 'auto' ? null : parseInt(e.target.value) 
-                    })}
-                    style={styles.settingSelect}
-                  >
-                    <option value="auto">Auto (10 for 2-3 players, 8 for 4-5)</option>
-                    <option value="8">8 cards</option>
-                    <option value="10">10 cards</option>
-                    <option value="12">12 cards</option>
-                  </select>
+                  {(() => {
+                    const numPlayers = Math.max(1, uniquePlayers.length)
+                    const maxHand = Math.floor(72 / numPlayers)
+                    const raw = gameSettings.handSize
+                    const value = raw == null || raw === '' ? '' : String(raw)
+                    return (
+                      <>
+                        <input
+                          type="number"
+                          min={1}
+                          max={maxHand}
+                          value={value}
+                          onChange={(e) => {
+                            const v = e.target.value
+                            if (v === '') {
+                              handleUpdateSettings({ handSize: null })
+                              return
+                            }
+                            const n = parseInt(v, 10)
+                            if (Number.isNaN(n)) return
+                            const clamped = Math.min(maxHand, Math.max(1, n))
+                            handleUpdateSettings({ handSize: clamped })
+                          }}
+                          style={styles.settingInput}
+                          placeholder={`Auto (max ${maxHand} for ${numPlayers} player${numPlayers !== 1 ? 's' : ''})`}
+                        />
+                        <div style={styles.settingHint}>
+                          Max 72 ÷ players = {maxHand} per player
+                        </div>
+                      </>
+                    )
+                  })()}
                 </div>
 
                 <div style={styles.settingItem}>
@@ -903,7 +938,14 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
               style={{ ...styles.joinButton, ...(isMobile ? { minHeight: 48, padding: '16px' } : {}) }}
               disabled={!joinCode.trim() || !playerName.trim()}
             >
-              Join Room
+              Join as Player
+            </button>
+            <button
+              onClick={handleJoinAsSpectator}
+              style={{ ...styles.joinButton, ...styles.spectatorJoinButton, ...(isMobile ? { minHeight: 48, padding: '16px' } : {}) }}
+              disabled={!joinCode.trim() || !playerName.trim()}
+            >
+              Join as Spectator
             </button>
           </div>
         </div>
@@ -1090,6 +1132,40 @@ const styles = {
     fontWeight: '700',
     borderRadius: '12px',
     boxShadow: '0 4px 12px rgba(76, 175, 80, 0.3)'
+  },
+  spectatorJoinButton: {
+    background: 'transparent',
+    color: '#667eea',
+    border: '2px solid #667eea',
+    boxShadow: 'none'
+  },
+  spectatorsSection: {
+    marginTop: '12px',
+    padding: '12px',
+    background: 'rgba(102, 126, 234, 0.08)',
+    borderRadius: '12px',
+    border: '1px solid rgba(102, 126, 234, 0.2)'
+  },
+  spectatorsLabel: {
+    fontSize: '12px',
+    color: '#666',
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+    marginBottom: '8px'
+  },
+  spectatorsList: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '8px'
+  },
+  spectatorChip: {
+    background: 'rgba(255,255,255,0.9)',
+    padding: '4px 10px',
+    borderRadius: '16px',
+    fontSize: '13px',
+    color: '#555',
+    border: '1px solid rgba(0,0,0,0.08)'
   },
   headerSection: {
     marginBottom: '32px',
@@ -1602,6 +1678,12 @@ const styles = {
     border: '2px solid #e0e0e0',
     borderRadius: '8px',
     background: 'white'
+  },
+  settingHint: {
+    fontSize: '12px',
+    color: '#888',
+    marginTop: '6px',
+    textAlign: 'left'
   },
   settingToggle: {
     display: 'flex',

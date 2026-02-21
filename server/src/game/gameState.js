@@ -16,8 +16,15 @@ export const TurnPhase = {
 
 export function createGameState(players, previousWinner = null, settings = {}) {
   const numPlayers = players.length
-  // Use settings handSize if provided, otherwise use default logic
-  const handSize = settings?.handSize || (numPlayers <= 3 ? 10 : 8)
+  const maxHandPerPlayer = numPlayers > 0 ? Math.floor(72 / numPlayers) : 72
+  const defaultHandSize = numPlayers <= 3 ? 10 : 8
+  // Use settings handSize if provided (clamped to 1..maxHandPerPlayer), otherwise default
+  let handSize = settings?.handSize ?? defaultHandSize
+  if (typeof handSize === 'number') {
+    handSize = Math.min(maxHandPerPlayer, Math.max(1, handSize))
+  } else {
+    handSize = defaultHandSize
+  }
 
   const deck = createDeck()
   const gamePlayers = players.map((player, index) => ({
@@ -163,6 +170,28 @@ export function getPublicGameState(state, playerId) {
     pendingCapture: state.pendingCapture && state.pendingCapture.playerId === playerId
       ? state.pendingCapture
       : null,
+    winner: state.winner
+  }
+}
+
+/** View for spectators: include all hands so they can click a player to view */
+export function getSpectatorGameState(state) {
+  if (!state || !state.players) return null
+  return {
+    status: state.status,
+    players: state.players.map(p => ({
+      id: p.id,
+      name: p.name,
+      handSize: p.hand?.length ?? 0,
+      hand: p.hand ?? []
+    })),
+    drawPileSize: state.drawPile?.length ?? 0,
+    discardPileSize: state.discardPile?.length ?? 0,
+    currentCombo: state.currentCombo,
+    currentComboOwner: state.currentComboOwner,
+    currentPlayerIndex: state.currentPlayerIndex,
+    turnPhase: state.turnPhase,
+    pendingCapture: null,
     winner: state.winner
   }
 }

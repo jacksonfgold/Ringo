@@ -3,6 +3,7 @@ import { DndContext, useDraggable, useDroppable, DragOverlay, useSensor, useSens
 import { CSS } from '@dnd-kit/utilities'
 import confetti from 'canvas-confetti'
 import { NotificationSystem } from './NotificationSystem'
+import { showToast } from './Toast'
 import { soundManager } from '../utils/soundEffects'
 
 // --- Draggable/Droppable Components ---
@@ -60,7 +61,7 @@ const getCardColor = (value) => {
   return colors[value] || '#7F8C8D'
 }
 
-export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [], onGoHome }) {
+export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [], onGoHome, isSpectator = false }) {
   const [selectedCards, setSelectedCards] = useState([])
   const [splitResolutions, setSplitResolutions] = useState({})
   const [drawnCard, setDrawnCard] = useState(null)
@@ -92,6 +93,7 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
   })
   const [ringoShake, setRingoShake] = useState(false)
   const [botThinking, setBotThinking] = useState(false)
+  const [viewingHandPlayer, setViewingHandPlayer] = useState(null)
 
   // Configure sensors for drag vs click distinction
   const mouseSensor = useSensor(MouseSensor, {
@@ -565,7 +567,7 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
     }, (response) => {
       if (!response.success) {
         soundManager.playInvalidMove()
-        alert(response.error || 'Invalid play')
+        showToast(response.error || 'Invalid play', 'error')
         setSelectedCards([])
         setSplitResolutions({})
       }
@@ -580,7 +582,7 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
     }, (response) => {
       if (!response.success) {
         soundManager.playInvalidMove()
-        alert(response.error || 'Failed to draw card')
+        showToast(response.error || 'Failed to draw card', 'error')
       }
     })
   }
@@ -607,7 +609,7 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
     }, (response) => {
       if (!response.success) {
         soundManager.playInvalidMove()
-        alert(response.error || 'Invalid RINGO')
+        showToast(response.error || 'Invalid RINGO', 'error')
       }
     })
   }
@@ -620,7 +622,7 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
     }, (response) => {
       if (!response.success) {
         soundManager.playInvalidMove()
-        alert(response.error || 'Failed to insert card')
+        showToast(response.error || 'Failed to insert card', 'error')
       } else {
         setInsertingCard(false)
       }
@@ -635,7 +637,7 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
       cardId
     }, (response) => {
       if (!response.success) {
-        alert(response.error || 'Failed to capture combo')
+        showToast(response.error || 'Failed to capture combo', 'error')
       } else {
         setInsertingCapture(null)
       }
@@ -647,7 +649,7 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
       roomCode: effectiveRoomCode
     }, (response) => {
       if (!response.success) {
-        alert(response.error || 'Failed to discard card')
+        showToast(response.error || 'Failed to discard card', 'error')
       }
     })
   }
@@ -850,6 +852,11 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
             </div>
           </div>
         )}
+        {isSpectator && (
+          <div style={styles.spectatorBanner}>
+            👁️ You're spectating — view only
+          </div>
+        )}
         <button
           onClick={onGoHome}
           style={{
@@ -907,14 +914,21 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
               
               const isBot = roomPlayers.find(p => p.id === player.id)?.isBot
               
+              const hasHandData = player.hand && Array.isArray(player.hand) && player.hand.length > 0
+              const canViewHand = hasHandData || handSize > 0
               return (
                 <div
                   key={player.id || `${player.name}-${index}`}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => canViewHand && setViewingHandPlayer({ ...player, index })}
+                  onKeyDown={(e) => canViewHand && (e.key === 'Enter' || e.key === ' ') && setViewingHandPlayer({ ...player, index })}
                   style={{
                     ...styles.playerCard,
                     ...(isActive ? styles.activePlayer : {}),
                     ...(isMe ? styles.currentPlayerCard : {}),
                     ...(showAllCards ? styles.playerCardWithCards : {}),
+                    ...(canViewHand ? styles.playerCardClickable : {}),
                     position: 'relative'
                   }}
                 >
@@ -985,12 +999,72 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
                       })}
                     </div>
                   ) : (
-                    <div style={styles.cardCount}>{handSize} cards</div>
+                    <div style={styles.cardCount}>{handSize} cards{canViewHand ? ' · Tap to view' : ''}</div>
                   )}
                 </div>
               )
             })}
           </div>
+
+          {/* Modal: view a player's hand */}
+          {viewingHandPlayer && (
+            <div
+              style={styles.handModalOverlay}
+              onClick={() => setViewingHandPlayer(null)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => e.key === 'Escape' && setViewingHandPlayer(null)}
+            >
+              <div style={styles.handModalContent} onClick={(e) => e.stopPropagation()}>
+                <div style={styles.handModalHeader}>
+                  <h3 style={styles.handModalTitle}>
+                    {viewingHandPlayer.name}'s hand
+                    {roomPlayers.find(p => p.id === viewingHandPlayer.id)?.isBot ? ' 🤖' : ''}
+                  </h3>
+                  <button
+                    type="button"
+                    style={styles.handModalClose}
+                    onClick={() => setViewingHandPlayer(null)}
+                    aria-label="Close"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div style={styles.handModalCards}>
+                  {viewingHandPlayer.hand && Array.isArray(viewingHandPlayer.hand) && viewingHandPlayer.hand.length > 0 ? (
+                    viewingHandPlayer.hand.map((card, cardIdx) => {
+                      const cardColor = card.isSplit
+                        ? `linear-gradient(to right, ${getCardColor(card.splitValues[0])} 0%, ${getCardColor(card.splitValues[0])} 50%, ${getCardColor(card.splitValues[1])} 50%, ${getCardColor(card.splitValues[1])} 100%)`
+                        : getCardColor(card.value)
+                      return (
+                        <div
+                          key={cardIdx}
+                          style={{
+                            ...styles.handModalCard,
+                            background: cardColor
+                          }}
+                        >
+                          {card.isSplit ? (
+                            <div style={styles.splitCardContainer}>
+                              <div style={styles.splitCardValue}>{card.splitValues[0]}</div>
+                              <div style={styles.splitDivider}>/</div>
+                              <div style={styles.splitCardValue}>{card.splitValues[1]}</div>
+                            </div>
+                          ) : (
+                            <div style={styles.cardValue}>{card.value}</div>
+                          )}
+                        </div>
+                      )
+                    })
+                  ) : (
+                    <div style={styles.handModalCountOnly}>
+                      {(viewingHandPlayer.handSize ?? viewingHandPlayer.hand?.length ?? 0) || 0} cards (hidden)
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Current Combo / Play Area (Hidden when drawnCard active for cleaner look, or just allow stacking) */}
           {!drawnCard && !gameState?.pendingCapture?.cards && (
@@ -1572,6 +1646,89 @@ const styles = {
     userSelect: 'none',
     WebkitUserSelect: 'none'
   },
+  spectatorBanner: {
+    position: 'absolute',
+    top: '16px',
+    left: '50%',
+    transform: 'translateX(-50%)',
+    background: 'rgba(0, 0, 0, 0.5)',
+    color: 'white',
+    padding: '8px 20px',
+    borderRadius: '20px',
+    fontSize: '14px',
+    fontWeight: '600',
+    zIndex: 99,
+    backdropFilter: 'blur(8px)',
+    border: '1px solid rgba(255,255,255,0.2)'
+  },
+  handModalOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    background: 'rgba(0,0,0,0.6)',
+    backdropFilter: 'blur(4px)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2000,
+    padding: 20
+  },
+  handModalContent: {
+    background: 'rgba(255,255,255,0.98)',
+    borderRadius: '24px',
+    padding: '24px',
+    maxWidth: '90vw',
+    maxHeight: '80vh',
+    overflow: 'auto',
+    boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+    border: '1px solid rgba(255,255,255,0.5)'
+  },
+  handModalHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: '16px'
+  },
+  handModalTitle: {
+    fontSize: '20px',
+    fontWeight: '800',
+    color: '#333',
+    margin: 0
+  },
+  handModalClose: {
+    background: 'none',
+    border: 'none',
+    fontSize: '24px',
+    cursor: 'pointer',
+    padding: '4px 8px',
+    color: '#666',
+    lineHeight: 1
+  },
+  handModalCards: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '10px',
+    justifyContent: 'center'
+  },
+  handModalCard: {
+    width: '52px',
+    height: '78px',
+    borderRadius: '8px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: 'white',
+    fontWeight: '800',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+    border: '1px solid rgba(0,0,0,0.1)'
+  },
+  handModalCountOnly: {
+    fontSize: '16px',
+    color: '#666',
+    fontStyle: 'italic'
+  },
   homeButton: {
     position: 'absolute',
     top: '16px',
@@ -1637,6 +1794,9 @@ const styles = {
     backdropFilter: 'blur(5px)',
     border: '1px solid rgba(255,255,255,0.4)',
     transition: 'transform 0.2s'
+  },
+  playerCardClickable: {
+    cursor: 'pointer'
   },
   currentPlayerCard: {
     background: 'rgba(255, 255, 255, 0.95)',

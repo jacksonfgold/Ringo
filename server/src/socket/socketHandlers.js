@@ -1,5 +1,5 @@
 import { roomManager } from '../rooms/roomManager.js'
-import { createGameState, getPublicGameState, GameStatus } from '../game/gameState.js'
+import { createGameState, getPublicGameState, getSpectatorGameState, GameStatus } from '../game/gameState.js'
 import { 
   handlePlay, 
   handleDrawWithTracking, 
@@ -60,6 +60,37 @@ function buildPublicState(room, playerId) {
   return publicState
 }
 
+function buildSpectatorState(room) {
+  if (!room?.gameState) return null
+  const state = getSpectatorGameState(room.gameState)
+  if (!state) return null
+  state.players = state.players.map(p => ({
+    ...p,
+    wins: room.players.find(rp => rp.id === p.id)?.wins ?? 0
+  }))
+  state.hostId = room.hostId
+  return state
+}
+
+function emitRoomUpdate(io, room) {
+  io.to(room.code).emit('roomUpdate', {
+    players: room.players,
+    spectators: room.spectators || [],
+    roomCode: room.code,
+    hostId: room.hostId
+  })
+}
+
+function emitGameStateToSpectators(io, room, roomCode, extra = {}) {
+  if (!room.spectators?.length || !room.gameState) return
+  const spectatorState = buildSpectatorState(room)
+  if (!spectatorState) return
+  const payload = { gameState: { ...spectatorState, roomCode }, ...extra }
+  room.spectators.forEach(spectator => {
+    io.to(spectator.id).emit('gameStateUpdate', payload)
+  })
+}
+
 // Store pending bot actions
 const botActionTimers = new Map()
 
@@ -116,11 +147,7 @@ async function executeBotTurn(io, room, roomCode, botId, difficulty) {
         
         const winsIncremented = incrementWinnerWins(room, previousStatus)
         if (winsIncremented) {
-          io.to(room.code).emit('roomUpdate', {
-            players: room.players,
-            roomCode: room.code,
-            hostId: room.hostId
-          })
+emitRoomUpdate(io, room)
         }
         
         // Broadcast to all players
@@ -131,6 +158,7 @@ async function executeBotTurn(io, room, roomCode, botId, difficulty) {
             })
           }
         })
+        emitGameStateToSpectators(io, room, roomCode)
         
         // Notify about bot action
         io.to(room.code).emit('playerNotification', {
@@ -171,6 +199,7 @@ async function executeBotTurn(io, room, roomCode, botId, difficulty) {
             })
           }
         })
+        emitGameStateToSpectators(io, room, roomCode)
         
         // Bot decides what to do with drawn card
         setTimeout(() => executeBotDrawDecision(io, room, roomCode, botId, difficulty, result.drawnCard), 800)
@@ -216,11 +245,7 @@ async function executeBotDrawDecision(io, room, roomCode, botId, difficulty, dra
       
       const winsIncremented = incrementWinnerWins(room, previousStatus)
       if (winsIncremented) {
-        io.to(room.code).emit('roomUpdate', {
-          players: room.players,
-          roomCode: room.code,
-          hostId: room.hostId
-        })
+        emitRoomUpdate(io, room)
       }
       
       room.players.forEach(player => {
@@ -231,6 +256,7 @@ async function executeBotDrawDecision(io, room, roomCode, botId, difficulty, dra
           })
         }
       })
+      emitGameStateToSpectators(io, room, roomCode)
       
       io.to(room.code).emit('playerNotification', {
         type: 'info',
@@ -264,19 +290,16 @@ async function executeBotDrawDecision(io, room, roomCode, botId, difficulty, dra
         
         const winsIncremented = incrementWinnerWins(room, previousStatus)
         if (winsIncremented) {
-          io.to(room.code).emit('roomUpdate', {
-            players: room.players,
-            roomCode: room.code,
-            hostId: room.hostId
-          })
+emitRoomUpdate(io, room)
         }
         
         room.players.forEach(player => {
           const publicState = getPublicGameState(room.gameState, player.id)
           if (publicState) {
-            io.to(player.id).emit('gameStateUpdate', { gameState: publicState })
+            io.to(player.id).emit('gameStateUpdate', { gameState: { ...publicState, roomCode } })
           }
         })
+        emitGameStateToSpectators(io, room, roomCode)
         
         // Continue bot turns if needed
         if (room.gameState.status === GameStatus.PLAYING) {
@@ -295,11 +318,7 @@ async function executeBotDrawDecision(io, room, roomCode, botId, difficulty, dra
       
       const winsIncremented = incrementWinnerWins(room, previousStatus)
       if (winsIncremented) {
-        io.to(room.code).emit('roomUpdate', {
-          players: room.players,
-          roomCode: room.code,
-          hostId: room.hostId
-        })
+        emitRoomUpdate(io, room)
       }
       
       room.players.forEach(player => {
@@ -309,6 +328,7 @@ async function executeBotDrawDecision(io, room, roomCode, botId, difficulty, dra
           })
         }
       })
+      emitGameStateToSpectators(io, room, roomCode)
       
       io.to(room.code).emit('playerNotification', {
         type: 'info',
@@ -344,11 +364,7 @@ async function executeBotCapture(io, room, roomCode, botId, difficulty) {
       
       const winsIncremented = incrementWinnerWins(room, previousStatus)
       if (winsIncremented) {
-        io.to(room.code).emit('roomUpdate', {
-          players: room.players,
-          roomCode: room.code,
-          hostId: room.hostId
-        })
+        emitRoomUpdate(io, room)
       }
       
       room.players.forEach(player => {
@@ -358,6 +374,7 @@ async function executeBotCapture(io, room, roomCode, botId, difficulty) {
           })
         }
       })
+      emitGameStateToSpectators(io, room, roomCode)
       
       io.to(room.code).emit('playerNotification', {
         type: 'info',
@@ -405,11 +422,7 @@ async function insertCapturedCardsSequentially(io, room, roomCode, botId, diffic
       
       const winsIncremented = incrementWinnerWins(room, previousStatus)
       if (winsIncremented) {
-        io.to(room.code).emit('roomUpdate', {
-          players: room.players,
-          roomCode: room.code,
-          hostId: room.hostId
-        })
+        emitRoomUpdate(io, room)
       }
       
       room.players.forEach(player => {
@@ -419,6 +432,7 @@ async function insertCapturedCardsSequentially(io, room, roomCode, botId, diffic
           })
         }
       })
+      emitGameStateToSpectators(io, room, roomCode)
       
       // Small delay between insertions
       await new Promise(resolve => setTimeout(resolve, 300))
@@ -529,11 +543,7 @@ export function setupSocketHandlers(io) {
         room.updateActivity()
         socket.join(room.code)
         
-        io.to(room.code).emit('roomUpdate', {
-          players: room.players,
-          roomCode: room.code,
-          hostId: room.hostId
-        })
+        emitRoomUpdate(io, room)
 
         callback({ 
           success: true, 
@@ -589,11 +599,7 @@ export function setupSocketHandlers(io) {
           }
         }
         
-        io.to(room.code).emit('roomUpdate', {
-          players: room.players,
-          roomCode: room.code,
-          hostId: room.hostId
-        })
+        emitRoomUpdate(io, room)
 
         // Get the updated game state for the rejoining player BEFORE broadcasting
         const rejoiningPlayerGameState = buildPublicState(room, socket.id)
@@ -613,6 +619,7 @@ export function setupSocketHandlers(io) {
               gameState: { ...publicState, roomCode: data.roomCode }
             })
           })
+          emitGameStateToSpectators(io, room, data.roomCode)
         }
 
         callback({ 
@@ -626,17 +633,35 @@ export function setupSocketHandlers(io) {
       }
     })
 
+    socket.on('joinAsSpectator', (data, callback) => {
+      if (!checkRateLimit(socket.id)) {
+        return callback({ error: 'Rate limit exceeded' })
+      }
+      try {
+        const room = roomManager.joinRoomAsSpectator(data.roomCode, socket.id, data.playerName || 'Spectator')
+        room.updateActivity()
+        socket.join(room.code)
+        emitRoomUpdate(io, room)
+        const spectatorState = buildSpectatorState(room)
+        callback({
+          success: true,
+          players: room.players,
+          spectators: room.spectators,
+          hostId: room.hostId,
+          isSpectator: true,
+          gameState: spectatorState ? { ...spectatorState, roomCode: room.code } : null
+        })
+      } catch (error) {
+        callback({ error: error.message })
+      }
+    })
+
     socket.on('leaveRoom', (data) => {
       const room = roomManager.leaveRoom(data.roomCode, socket.id)
       socket.leave(data.roomCode)
-      
       if (room) {
         room.updateActivity()
-        io.to(data.roomCode).emit('roomUpdate', {
-          players: room.players,
-          roomCode: data.roomCode,
-          hostId: room.hostId
-        })
+        emitRoomUpdate(io, room)
       }
     })
 
@@ -675,11 +700,7 @@ export function setupSocketHandlers(io) {
         
         room.players.push(bot)
 
-        io.to(room.code).emit('roomUpdate', {
-          players: room.players,
-          roomCode: room.code,
-          hostId: room.hostId
-        })
+        emitRoomUpdate(io, room)
 
         callback({ success: true, players: room.players })
       } catch (error) {
@@ -719,11 +740,7 @@ export function setupSocketHandlers(io) {
 
         room.players.splice(botIndex, 1)
 
-        io.to(room.code).emit('roomUpdate', {
-          players: room.players,
-          roomCode: room.code,
-          hostId: room.hostId
-        })
+        emitRoomUpdate(io, room)
 
         callback({ success: true, players: room.players })
       } catch (error) {
@@ -772,11 +789,7 @@ export function setupSocketHandlers(io) {
 
         bot.name = newName
 
-        io.to(room.code).emit('roomUpdate', {
-          players: room.players,
-          roomCode: room.code,
-          hostId: room.hostId
-        })
+        emitRoomUpdate(io, room)
 
         callback({ success: true, players: room.players })
       } catch (error) {
@@ -821,11 +834,7 @@ export function setupSocketHandlers(io) {
 
         room.players = reorderedPlayers
 
-        io.to(room.code).emit('roomUpdate', {
-          players: room.players,
-          roomCode: room.code,
-          hostId: room.hostId
-        })
+        emitRoomUpdate(io, room)
 
         callback({ success: true, players: room.players })
       } catch (error) {
@@ -917,11 +926,7 @@ export function setupSocketHandlers(io) {
         io.to(room.code).emit('gameStateReset')
         
         // Emit roomUpdate to refresh lobby with latest player data (including wins)
-        io.to(room.code).emit('roomUpdate', {
-          players: room.players,
-          roomCode: room.code,
-          hostId: room.hostId
-        })
+        emitRoomUpdate(io, room)
 
         // Broadcast game state to all players (only non-bots)
         room.players.forEach(player => {
@@ -937,6 +942,7 @@ export function setupSocketHandlers(io) {
             }
           }
         })
+        emitGameStateToSpectators(io, room, data.roomCode, { isNewGame: true })
 
         callback({ success: true })
         
@@ -983,17 +989,9 @@ export function setupSocketHandlers(io) {
       const winsIncremented = incrementWinnerWins(room, previousStatus)
       // Emit roomUpdate when game ends (GAME_OVER) to ensure clients have latest player data
       if (room.gameState.status === GameStatus.GAME_OVER && previousStatus !== GameStatus.GAME_OVER) {
-        io.to(room.code).emit('roomUpdate', {
-          players: room.players,
-          roomCode: room.code,
-          hostId: room.hostId
-        })
+        emitRoomUpdate(io, room)
       } else if (winsIncremented) {
-        io.to(room.code).emit('roomUpdate', {
-          players: room.players,
-          roomCode: room.code,
-          hostId: room.hostId
-        })
+        emitRoomUpdate(io, room)
       }
 
       // Broadcast updated game state to all players
@@ -1006,6 +1004,7 @@ export function setupSocketHandlers(io) {
           })
         }
       })
+      emitGameStateToSpectators(io, room, data.roomCode)
 
       callback({ success: true })
       
@@ -1068,6 +1067,7 @@ export function setupSocketHandlers(io) {
           })
         }
       })
+      emitGameStateToSpectators(io, room, data.roomCode)
 
       callback({ success: true, ringoPossible: result.ringoPossible })
     })
@@ -1108,17 +1108,9 @@ export function setupSocketHandlers(io) {
       const winsIncremented = incrementWinnerWins(room, previousStatus)
       // Emit roomUpdate when game ends (GAME_OVER) to ensure clients have latest player data
       if (room.gameState.status === GameStatus.GAME_OVER && previousStatus !== GameStatus.GAME_OVER) {
-        io.to(room.code).emit('roomUpdate', {
-          players: room.players,
-          roomCode: room.code,
-          hostId: room.hostId
-        })
+        emitRoomUpdate(io, room)
       } else if (winsIncremented) {
-        io.to(room.code).emit('roomUpdate', {
-          players: room.players,
-          roomCode: room.code,
-          hostId: room.hostId
-        })
+        emitRoomUpdate(io, room)
       }
 
       // Broadcast updated game state to all players
@@ -1132,6 +1124,7 @@ export function setupSocketHandlers(io) {
           })
         }
       })
+      emitGameStateToSpectators(io, room, data.roomCode)
 
       callback({ success: true })
       
@@ -1186,17 +1179,9 @@ export function setupSocketHandlers(io) {
       const winsIncremented = incrementWinnerWins(room, previousStatus)
       // Emit roomUpdate when game ends (GAME_OVER) to ensure clients have latest player data
       if (room.gameState.status === GameStatus.GAME_OVER && previousStatus !== GameStatus.GAME_OVER) {
-        io.to(room.code).emit('roomUpdate', {
-          players: room.players,
-          roomCode: room.code,
-          hostId: room.hostId
-        })
+        emitRoomUpdate(io, room)
       } else if (winsIncremented) {
-        io.to(room.code).emit('roomUpdate', {
-          players: room.players,
-          roomCode: room.code,
-          hostId: room.hostId
-        })
+        emitRoomUpdate(io, room)
       }
 
       // Broadcast updated game state to all players
@@ -1207,6 +1192,7 @@ export function setupSocketHandlers(io) {
           })
         }
       })
+      emitGameStateToSpectators(io, room, data.roomCode)
 
       callback({ success: true })
       
@@ -1259,17 +1245,9 @@ export function setupSocketHandlers(io) {
       const winsIncremented = incrementWinnerWins(room, previousStatus)
       // Emit roomUpdate when game ends (GAME_OVER) to ensure clients have latest player data
       if (room.gameState.status === GameStatus.GAME_OVER && previousStatus !== GameStatus.GAME_OVER) {
-        io.to(room.code).emit('roomUpdate', {
-          players: room.players,
-          roomCode: room.code,
-          hostId: room.hostId
-        })
+        emitRoomUpdate(io, room)
       } else if (winsIncremented) {
-        io.to(room.code).emit('roomUpdate', {
-          players: room.players,
-          roomCode: room.code,
-          hostId: room.hostId
-        })
+        emitRoomUpdate(io, room)
       }
 
       // Broadcast updated game state to all players
@@ -1280,6 +1258,7 @@ export function setupSocketHandlers(io) {
           })
         }
       })
+      emitGameStateToSpectators(io, room, data.roomCode)
 
       callback({ success: true })
       
@@ -1361,17 +1340,9 @@ export function setupSocketHandlers(io) {
       const winsIncremented = incrementWinnerWins(room, previousStatus)
       // Emit roomUpdate when game ends (GAME_OVER) to ensure clients have latest player data
       if (room.gameState.status === GameStatus.GAME_OVER && previousStatus !== GameStatus.GAME_OVER) {
-        io.to(room.code).emit('roomUpdate', {
-          players: room.players,
-          roomCode: room.code,
-          hostId: room.hostId
-        })
+        emitRoomUpdate(io, room)
       } else if (winsIncremented) {
-        io.to(room.code).emit('roomUpdate', {
-          players: room.players,
-          roomCode: room.code,
-          hostId: room.hostId
-        })
+        emitRoomUpdate(io, room)
       }
 
       room.players.forEach(player => {
@@ -1381,6 +1352,7 @@ export function setupSocketHandlers(io) {
           })
         }
       })
+      emitGameStateToSpectators(io, room, data.roomCode)
 
       callback({ success: true })
       
@@ -1392,30 +1364,25 @@ export function setupSocketHandlers(io) {
 
     socket.on('disconnect', () => {
       console.log('Client disconnected:', socket.id)
-      
-      // Find and remove player from any rooms
       for (const [code, room] of roomManager.rooms.entries()) {
+        const isSpectator = room.spectators?.some(s => s.id === socket.id)
+        if (isSpectator) {
+          room.removeSpectator(socket.id)
+          if (room.isEmpty()) {
+            roomManager.rooms.delete(code)
+          } else {
+            emitRoomUpdate(io, room)
+          }
+          continue
+        }
         if (room.getPlayer(socket.id)) {
-          // If a game is in progress, keep the player in the room and mark disconnected
           if (room.gameState && room.gameState.status === GameStatus.PLAYING) {
             const player = room.getPlayer(socket.id)
-            if (player) {
-              player.disconnected = true
-            }
-            io.to(code).emit('roomUpdate', {
-              players: room.players,
-              roomCode: code,
-              hostId: room.hostId
-            })
+            if (player) player.disconnected = true
+            emitRoomUpdate(io, room)
           } else {
             const updatedRoom = roomManager.leaveRoom(code, socket.id)
-            if (updatedRoom) {
-              io.to(code).emit('roomUpdate', {
-                players: updatedRoom.players,
-                roomCode: code,
-                hostId: updatedRoom.hostId
-              })
-            }
+            if (updatedRoom) emitRoomUpdate(io, updatedRoom)
           }
         }
       }

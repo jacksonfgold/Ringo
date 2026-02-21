@@ -5,6 +5,7 @@ class Room {
     this.code = code
     this.hostId = hostId
     this.players = []
+    this.spectators = [] // { id, name } - view only, not in game
     this.gameState = null
     this.settings = {
       handSize: null,
@@ -23,6 +24,17 @@ class Room {
   
   isInactive(timeoutMs) {
     return Date.now() - this.lastActivity > timeoutMs
+  }
+
+  addSpectator(spectatorId, spectatorName) {
+    if (this.spectators.find(s => s.id === spectatorId)) return this.spectators
+    this.spectators.push({ id: spectatorId, name: spectatorName || 'Spectator' })
+    return this.spectators
+  }
+
+  removeSpectator(spectatorId) {
+    this.spectators = this.spectators.filter(s => s.id !== spectatorId)
+    return this.spectators
   }
 
   addPlayer(playerId, playerName) {
@@ -56,7 +68,11 @@ class Room {
   }
 
   isEmpty() {
-    return this.players.length === 0
+    return this.players.length === 0 && this.spectators.length === 0
+  }
+
+  hasAnyone() {
+    return this.players.length > 0 || this.spectators.length > 0
   }
 }
 
@@ -147,10 +163,26 @@ class RoomManager {
       return null
     }
     room.removePlayer(playerId)
+    room.removeSpectator(playerId)
     if (room.isEmpty()) {
       this.rooms.delete(code)
       return null
     }
+    return room
+  }
+
+  joinRoomAsSpectator(code, spectatorId, spectatorName) {
+    const room = this.rooms.get(code)
+    if (!room) {
+      throw new Error('Room not found')
+    }
+    if (!room.settings.spectatorMode) {
+      throw new Error('Spectator mode is not enabled for this room')
+    }
+    if (room.spectators.find(s => s.id === spectatorId)) {
+      return room // already spectating
+    }
+    room.addSpectator(spectatorId, spectatorName)
     return room
   }
 
