@@ -22,14 +22,72 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
   const [editingBotId, setEditingBotId] = useState(null)
   const [editingBotName, setEditingBotName] = useState('')
   const [gameSettings, setGameSettings] = useState({
-    handSize: null, // null = auto (10 for 2-3 players, 8 for 4-5)
-    turnTimer: 0, // 0 = no timer, seconds
+    handSize: null,
+    turnTimer: 0,
     autoStart: false,
     allowRINGO: true,
     spectatorMode: false
   })
 
+  const GAME_PRESETS = {
+    classic: {
+      name: 'Classic',
+      desc: 'Default balance',
+      handSize: null,
+      turnTimer: 0,
+      autoStart: false,
+      allowRINGO: true,
+      spectatorMode: false
+    },
+    speed: {
+      name: 'Speed Ringo',
+      desc: '30s per turn',
+      handSize: null,
+      turnTimer: 30,
+      autoStart: false,
+      allowRINGO: true,
+      spectatorMode: false
+    },
+    ultra: {
+      name: 'Ultra Ringo',
+      desc: 'Max cards, big hands',
+      handSize: 'max',
+      turnTimer: 0,
+      autoStart: false,
+      allowRINGO: true,
+      spectatorMode: false
+    },
+    blitz: {
+      name: 'Blitz',
+      desc: '15s timer, 6 cards',
+      handSize: 6,
+      turnTimer: 15,
+      autoStart: false,
+      allowRINGO: true,
+      spectatorMode: false
+    },
+    chill: {
+      name: 'Chill',
+      desc: 'Spectators allowed',
+      handSize: null,
+      turnTimer: 0,
+      autoStart: false,
+      allowRINGO: true,
+      spectatorMode: true
+    },
+    tournament: {
+      name: 'Tournament',
+      desc: '60s timer, auto-start',
+      handSize: null,
+      turnTimer: 60,
+      autoStart: true,
+      allowRINGO: true,
+      spectatorMode: false
+    }
+  }
+
   const [copyFeedback, setCopyFeedback] = useState(false)
+  const [hoveredPreset, setHoveredPreset] = useState(null)
   const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768)
   
   useEffect(() => {
@@ -86,6 +144,9 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
       if (data.hostId !== undefined) {
         setHostId(data.hostId)
         setIsHost(socket.id === data.hostId)
+      }
+      if (data.settings && typeof data.settings === 'object') {
+        setGameSettings(prev => ({ handSize: null, turnTimer: 0, autoStart: false, allowRINGO: true, spectatorMode: false, ...data.settings }))
       }
     }
 
@@ -352,15 +413,31 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
   const handleUpdateSettings = (newSettings) => {
     const updated = { ...gameSettings, ...newSettings }
     setGameSettings(updated)
-    
     if (isHostEffective) {
-      socket.emit('updateRoomSettings', { 
-        roomCode, 
-        settings: updated 
-      }, (response) => {
-        if (!response.success) {
-          console.error('Failed to update settings:', response.error)
-        }
+      socket.emit('updateRoomSettings', { roomCode, settings: updated }, (response) => {
+        if (!response.success) console.error('Failed to update settings:', response.error)
+      })
+    }
+  }
+
+  const applyPreset = (presetKey) => {
+    const preset = GAME_PRESETS[presetKey]
+    if (!preset) return
+    const numPlayers = Math.max(1, uniquePlayers.length)
+    const maxHand = Math.floor(72 / numPlayers)
+    let handSize = preset.handSize
+    if (handSize === 'max') handSize = maxHand
+    const updated = {
+      handSize,
+      turnTimer: preset.turnTimer,
+      autoStart: preset.autoStart,
+      allowRINGO: preset.allowRINGO,
+      spectatorMode: preset.spectatorMode
+    }
+    setGameSettings(updated)
+    if (isHostEffective) {
+      socket.emit('updateRoomSettings', { roomCode, settings: updated }, (response) => {
+        if (!response.success) console.error('Failed to update settings:', response.error)
       })
     }
   }
@@ -753,104 +830,123 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
                 onClick={() => setShowSettings(!showSettings)}
                 style={{ ...styles.settingsButton, ...(isMobile ? { minHeight: 44, padding: '12px 20px' } : {}) }}
               >
-                ⚙️ Game Settings
+                {showSettings ? '✕ Close' : '⚙️ Game Settings'}
               </button>
             )}
 
             {/* Settings Panel */}
             {showSettings && isHostEffective && (
               <div style={styles.settingsPanel}>
-                <h3 style={styles.settingsTitle}>Game Settings</h3>
-                
-                <div style={styles.settingItem}>
-                  <label style={styles.settingLabel}>
-                    Starting Hand Size
-                  </label>
-                  {(() => {
-                    const numPlayers = Math.max(1, uniquePlayers.length)
-                    const maxHand = Math.floor(72 / numPlayers)
-                    const raw = gameSettings.handSize
-                    const value = raw == null || raw === '' ? '' : String(raw)
-                    return (
-                      <>
-                        <input
-                          type="number"
-                          min={1}
-                          max={maxHand}
-                          value={value}
-                          onChange={(e) => {
-                            const v = e.target.value
-                            if (v === '') {
-                              handleUpdateSettings({ handSize: null })
-                              return
-                            }
-                            const n = parseInt(v, 10)
-                            if (Number.isNaN(n)) return
-                            const clamped = Math.min(maxHand, Math.max(1, n))
-                            handleUpdateSettings({ handSize: clamped })
-                          }}
-                          style={styles.settingInput}
-                          placeholder={`Auto (max ${maxHand} for ${numPlayers} player${numPlayers !== 1 ? 's' : ''})`}
-                        />
-                        <div style={styles.settingHint}>
-                          Max 72 ÷ players = {maxHand} per player
+                <div style={styles.settingsHeader}>
+                  <h3 style={styles.settingsTitle}>Game Settings</h3>
+                  <p style={styles.settingsSubtitle}>Pick a preset or tweak below</p>
+                </div>
+
+                <div style={styles.presetsSection}>
+                  <div style={styles.presetsLabel}>Presets</div>
+                  <div style={styles.presetsGrid}>
+                    {Object.entries(GAME_PRESETS).map(([key, preset]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => applyPreset(key)}
+                        onMouseEnter={() => setHoveredPreset(key)}
+                        onMouseLeave={() => setHoveredPreset(null)}
+                        style={{
+                          ...styles.presetCard,
+                          ...(hoveredPreset === key ? styles.presetCardHover : {})
+                        }}
+                      >
+                        <span style={{ ...styles.presetName, ...(hoveredPreset === key ? { color: '#fff' } : {}) }}>{preset.name}</span>
+                        <span style={{ ...styles.presetDesc, ...(hoveredPreset === key ? { color: 'rgba(255,255,255,0.9)' } : {}) }}>{preset.desc}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div style={styles.settingsDivider} />
+
+                <div style={styles.settingsSection}>
+                  <div style={styles.sectionLabel}>Hand & pace</div>
+                  <div style={styles.settingRow}>
+                    <label style={styles.settingLabel}>Starting hand size</label>
+                    {(() => {
+                      const numPlayers = Math.max(1, uniquePlayers.length)
+                      const maxHand = Math.floor(72 / numPlayers)
+                      const raw = gameSettings.handSize
+                      const value = raw == null || raw === '' ? '' : String(raw)
+                      return (
+                        <div style={styles.inputWrap}>
+                          <input
+                            type="number"
+                            min={1}
+                            max={maxHand}
+                            value={value}
+                            onChange={(e) => {
+                              const v = e.target.value
+                              if (v === '') { handleUpdateSettings({ handSize: null }); return }
+                              const n = parseInt(v, 10)
+                              if (!Number.isNaN(n)) handleUpdateSettings({ handSize: Math.min(maxHand, Math.max(1, n)) })
+                            }}
+                            style={styles.settingInput}
+                            placeholder={`Auto (${maxHand} max)`}
+                          />
+                          <span style={styles.settingHint}>Max {maxHand} for {numPlayers} player{numPlayers !== 1 ? 's' : ''}</span>
                         </div>
-                      </>
-                    )
-                  })()}
+                      )
+                    })()}
+                  </div>
+                  <div style={styles.settingRow}>
+                    <label style={styles.settingLabel}>Turn timer (sec)</label>
+                    <div style={styles.timerRow}>
+                      <input
+                        type="range"
+                        min="0"
+                        max="120"
+                        step="5"
+                        value={Math.min(120, gameSettings.turnTimer || 0)}
+                        onChange={(e) => handleUpdateSettings({ turnTimer: parseInt(e.target.value, 10) || 0 })}
+                        style={styles.timerSlider}
+                      />
+                      <span style={styles.timerValue}>{gameSettings.turnTimer || 0}s</span>
+                    </div>
+                    <span style={styles.settingHint}>0 = no timer</span>
+                  </div>
                 </div>
 
-                <div style={styles.settingItem}>
-                  <label style={styles.settingLabel}>
-                    Turn Timer (seconds)
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="300"
-                    value={gameSettings.turnTimer}
-                    onChange={(e) => handleUpdateSettings({ 
-                      turnTimer: parseInt(e.target.value) || 0 
-                    })}
-                    style={styles.settingInput}
-                    placeholder="0 = no timer"
-                  />
-                </div>
+                <div style={styles.settingsDivider} />
 
-                <div style={styles.settingItem}>
-                  <label style={styles.settingToggle}>
-                    <input
-                      type="checkbox"
-                      checked={gameSettings.autoStart}
-                      onChange={(e) => handleUpdateSettings({ autoStart: e.target.checked })}
-                      style={styles.toggleCheckbox}
-                    />
-                    <span>Auto-start when room is full</span>
-                  </label>
-                </div>
-
-                <div style={styles.settingItem}>
-                  <label style={styles.settingToggle}>
-                    <input
-                      type="checkbox"
-                      checked={gameSettings.allowRINGO}
-                      onChange={(e) => handleUpdateSettings({ allowRINGO: e.target.checked })}
-                      style={styles.toggleCheckbox}
-                    />
-                    <span>Allow RINGO (winning move)</span>
-                  </label>
-                </div>
-
-                <div style={styles.settingItem}>
-                  <label style={styles.settingToggle}>
-                    <input
-                      type="checkbox"
-                      checked={gameSettings.spectatorMode}
-                      onChange={(e) => handleUpdateSettings({ spectatorMode: e.target.checked })}
-                      style={styles.toggleCheckbox}
-                    />
-                    <span>Allow spectators (view-only)</span>
-                  </label>
+                <div style={styles.settingsSection}>
+                  <div style={styles.sectionLabel}>Options</div>
+                  <div style={styles.togglesWrap}>
+                    <label style={styles.toggleRow}>
+                      <input
+                        type="checkbox"
+                        checked={gameSettings.autoStart}
+                        onChange={(e) => handleUpdateSettings({ autoStart: e.target.checked })}
+                        style={styles.toggleCheckbox}
+                      />
+                      <span>Auto-start when full</span>
+                    </label>
+                    <label style={styles.toggleRow}>
+                      <input
+                        type="checkbox"
+                        checked={gameSettings.allowRINGO}
+                        onChange={(e) => handleUpdateSettings({ allowRINGO: e.target.checked })}
+                        style={styles.toggleCheckbox}
+                      />
+                      <span>Allow RINGO</span>
+                    </label>
+                    <label style={styles.toggleRow}>
+                      <input
+                        type="checkbox"
+                        checked={gameSettings.spectatorMode}
+                        onChange={(e) => handleUpdateSettings({ spectatorMode: e.target.checked })}
+                        style={styles.toggleCheckbox}
+                      />
+                      <span>Allow spectators</span>
+                    </label>
+                  </div>
                 </div>
               </div>
             )}
@@ -1641,66 +1737,179 @@ const styles = {
     transition: 'all 0.2s'
   },
   settingsPanel: {
-    marginTop: '20px',
-    padding: '20px',
-    background: 'rgba(248, 249, 250, 0.8)',
-    borderRadius: '16px',
-    border: '1px solid rgba(102, 126, 234, 0.2)'
+    marginTop: 20,
+    padding: 24,
+    background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+    borderRadius: 20,
+    border: '2px solid #e2e8f0',
+    boxShadow: '0 4px 24px rgba(102, 126, 234, 0.08)'
+  },
+  settingsHeader: {
+    marginBottom: 20,
+    textAlign: 'center'
   },
   settingsTitle: {
-    fontSize: '20px',
-    fontWeight: '700',
-    color: '#444',
-    marginBottom: '20px',
-    textAlign: 'left'
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#2d3748',
+    margin: 0,
+    letterSpacing: '-0.02em'
   },
-  settingItem: {
-    marginBottom: '20px'
+  settingsSubtitle: {
+    fontSize: 13,
+    color: '#718096',
+    marginTop: 4,
+    marginBottom: 0
+  },
+  presetsSection: {
+    marginBottom: 20
+  },
+  presetsLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#718096',
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    marginBottom: 10
+  },
+  presetsGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))',
+    gap: 10
+  },
+  presetCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '14px 10px',
+    background: 'linear-gradient(145deg, #f7fafc 0%, #edf2f7 100%)',
+    border: '2px solid #e2e8f0',
+    borderRadius: 14,
+    cursor: 'pointer',
+    transition: 'all 0.2s ease',
+    textAlign: 'center',
+    minHeight: 70
+  },
+  presetName: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#2d3748',
+    display: 'block'
+  },
+  presetDesc: {
+    fontSize: 11,
+    color: '#718096',
+    marginTop: 2,
+    display: 'block'
+  },
+  presetCardHover: {
+    background: 'linear-gradient(145deg, #667eea 0%, #764ba2 100%)',
+    borderColor: '#667eea',
+    transform: 'translateY(-2px)',
+    boxShadow: '0 8px 20px rgba(102, 126, 234, 0.35)'
+  },
+  settingsDivider: {
+    height: 1,
+    background: 'linear-gradient(90deg, transparent, #e2e8f0, transparent)',
+    margin: '16px 0'
+  },
+  settingsSection: {
+    marginBottom: 16
+  },
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#718096',
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    marginBottom: 12
+  },
+  settingRow: {
+    marginBottom: 16
   },
   settingLabel: {
     display: 'block',
-    fontSize: '14px',
+    fontSize: 14,
     fontWeight: '600',
-    color: '#555',
-    marginBottom: '8px',
-    textAlign: 'left'
+    color: '#4a5568',
+    marginBottom: 6
+  },
+  inputWrap: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 4
+  },
+  settingInput: {
+    padding: '12px 14px',
+    fontSize: 15,
+    border: '2px solid #e2e8f0',
+    borderRadius: 12,
+    background: '#fff',
+    transition: 'border-color 0.2s'
+  },
+  settingHint: {
+    fontSize: 12,
+    color: '#a0aec0'
+  },
+  timerRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12
+  },
+  timerSlider: {
+    flex: 1,
+    height: 8,
+    borderRadius: 4,
+    accentColor: '#667eea',
+    cursor: 'pointer'
+  },
+  timerValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#4a5568',
+    minWidth: 36,
+    textAlign: 'right'
+  },
+  togglesWrap: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 12
+  },
+  toggleRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+    fontSize: 15,
+    fontWeight: '500',
+    color: '#4a5568',
+    cursor: 'pointer'
+  },
+  toggleCheckbox: {
+    width: 20,
+    height: 20,
+    cursor: 'pointer',
+    accentColor: '#667eea'
+  },
+  settingItem: {
+    marginBottom: 20
   },
   settingSelect: {
     width: '100%',
     padding: '10px 12px',
-    fontSize: '14px',
+    fontSize: 14,
     border: '2px solid #e0e0e0',
-    borderRadius: '8px',
+    borderRadius: 8,
     background: 'white',
     cursor: 'pointer'
-  },
-  settingInput: {
-    width: '100%',
-    padding: '10px 12px',
-    fontSize: '14px',
-    border: '2px solid #e0e0e0',
-    borderRadius: '8px',
-    background: 'white'
-  },
-  settingHint: {
-    fontSize: '12px',
-    color: '#888',
-    marginTop: '6px',
-    textAlign: 'left'
   },
   settingToggle: {
     display: 'flex',
     alignItems: 'center',
-    gap: '10px',
-    fontSize: '14px',
+    gap: 10,
+    fontSize: 14,
     color: '#555',
     cursor: 'pointer',
     textAlign: 'left'
-  },
-  toggleCheckbox: {
-    width: '18px',
-    height: '18px',
-    cursor: 'pointer',
-    accentColor: '#667eea'
   }
 }

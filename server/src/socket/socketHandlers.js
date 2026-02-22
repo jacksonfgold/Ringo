@@ -77,7 +77,8 @@ function emitRoomUpdate(io, room) {
     players: room.players,
     spectators: room.spectators || [],
     roomCode: room.code,
-    hostId: room.hostId
+    hostId: room.hostId,
+    settings: room.settings || {}
   })
 }
 
