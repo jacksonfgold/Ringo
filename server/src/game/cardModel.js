@@ -36,11 +36,10 @@ export function createDeck() {
   const deck = []
   let cardId = 0
 
-  // Standard cards (values 1-8)
-  // 9 cards per value to ensure enough cards for 5 players (8 cards each = 40 needed)
-  // Total: 8 values × 9 cards = 72 standard cards
+  // Standard cards (values 1-8), 8 of each
+  // Total: 8 values × 8 cards = 64 standard cards
   const standardValues = [1, 2, 3, 4, 5, 6, 7, 8]
-  const cardsPerValue = 9
+  const cardsPerValue = 8
 
   standardValues.forEach(value => {
     for (let i = 0; i < cardsPerValue; i++) {

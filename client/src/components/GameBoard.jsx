@@ -61,7 +61,7 @@ const getCardColor = (value) => {
   return colors[value] || '#7F8C8D'
 }
 
-export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [], onGoHome, isSpectator = false }) {
+export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [], onGoHome, isSpectator = false, turnTimer = null }) {
   const [selectedCards, setSelectedCards] = useState([])
   const [splitResolutions, setSplitResolutions] = useState({})
   const [drawnCard, setDrawnCard] = useState(null)
@@ -96,6 +96,22 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
   const [viewingHandPlayer, setViewingHandPlayer] = useState(null)
   const [showDiscardPileModal, setShowDiscardPileModal] = useState(false)
   const [showDrawPileModal, setShowDrawPileModal] = useState(false)
+  const [turnSecondsRemaining, setTurnSecondsRemaining] = useState(null)
+
+  useEffect(() => {
+    if (!turnTimer?.startedAt || turnTimer?.turnTimerSeconds == null) {
+      setTurnSecondsRemaining(null)
+      return
+    }
+    const compute = () => {
+      const elapsed = (Date.now() - turnTimer.startedAt) / 1000
+      const remaining = Math.max(0, Math.ceil(turnTimer.turnTimerSeconds - elapsed))
+      setTurnSecondsRemaining(remaining)
+    }
+    compute()
+    const interval = setInterval(compute, 1000)
+    return () => clearInterval(interval)
+  }, [turnTimer?.startedAt, turnTimer?.turnTimerSeconds])
 
   // Configure sensors for drag vs click distinction
   const mouseSensor = useSensor(MouseSensor, {
@@ -859,6 +875,24 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
             👁️ You're spectating — view only
           </div>
         )}
+        {turnSecondsRemaining != null && turnSecondsRemaining >= 0 && (
+          <div style={styles.turnTimerBar}>
+            <div style={styles.turnTimerBarLabel}>Your turn – time left</div>
+            <div style={styles.turnTimerBarCount}>
+              ⏱ {Math.floor(turnSecondsRemaining / 60)}:{(turnSecondsRemaining % 60).toString().padStart(2, '0')}
+            </div>
+            {turnTimer?.turnTimerSeconds > 0 && (
+              <div style={styles.turnTimerBarTrack}>
+                <div
+                  style={{
+                    ...styles.turnTimerBarFill,
+                    width: `${100 * (turnSecondsRemaining / turnTimer.turnTimerSeconds)}%`
+                  }}
+                />
+              </div>
+            )}
+          </div>
+        )}
         <button
           onClick={onGoHome}
           style={{
@@ -972,6 +1006,11 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
                         </div>
                         <div style={styles.turnIndicatorIcon}>✨</div>
                       </div>
+                      {isMe && turnSecondsRemaining != null && (
+                        <div style={{ ...styles.turnTimerCountdown, position: 'relative', marginTop: 4 }}>
+                          ⏱ {Math.floor(turnSecondsRemaining / 60)}:{(turnSecondsRemaining % 60).toString().padStart(2, '0')}
+                        </div>
+                      )}
                       <div style={{...styles.turnIndicatorSparkle, top: '20%', left: '20%'}}></div>
                       <div style={{...styles.turnIndicatorSparkle, top: '50%', right: '15%', animationDelay: '0.3s'}}></div>
                       <div style={{...styles.turnIndicatorSparkle, bottom: '20%', left: '50%', animationDelay: '0.6s'}}></div>
@@ -1994,6 +2033,55 @@ const styles = {
     zIndex: 2,
     textShadow: '0 2px 8px rgba(0, 0, 0, 0.3), 0 0 12px rgba(255, 255, 255, 0.5)',
     filter: 'drop-shadow(0 1px 2px rgba(0, 0, 0, 0.2))'
+  },
+  turnTimerCountdown: {
+    fontSize: '13px',
+    fontWeight: '800',
+    color: 'rgba(255,255,255,0.98)',
+    textShadow: '0 1px 4px rgba(0,0,0,0.5)',
+    whiteSpace: 'nowrap'
+  },
+  turnTimerBar: {
+    position: 'fixed',
+    top: 'max(56px, calc(env(safe-area-inset-top, 0px) + 48px))',
+    left: '50%',
+    transform: 'translateX(-50%)',
+    zIndex: 100,
+    background: 'linear-gradient(135deg, rgba(102, 126, 234, 0.95) 0%, rgba(118, 75, 162, 0.95) 100%)',
+    color: 'white',
+    padding: '12px 24px',
+    borderRadius: '16px',
+    boxShadow: '0 8px 32px rgba(102, 126, 234, 0.5), 0 0 0 2px rgba(255,255,255,0.3)',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: 6,
+    minWidth: 200
+  },
+  turnTimerBarLabel: {
+    fontSize: '12px',
+    fontWeight: '600',
+    opacity: 0.95,
+    letterSpacing: '0.5px'
+  },
+  turnTimerBarCount: {
+    fontSize: '28px',
+    fontWeight: '900',
+    fontVariantNumeric: 'tabular-nums',
+    letterSpacing: '2px'
+  },
+  turnTimerBarTrack: {
+    width: '100%',
+    height: 8,
+    borderRadius: 4,
+    background: 'rgba(0,0,0,0.25)',
+    overflow: 'hidden'
+  },
+  turnTimerBarFill: {
+    height: '100%',
+    background: 'rgba(255,255,255,0.9)',
+    borderRadius: 4,
+    transition: 'width 1s linear'
   },
   turnIndicatorBadgeGlow: {
     position: 'absolute',

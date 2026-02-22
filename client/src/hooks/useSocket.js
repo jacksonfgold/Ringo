@@ -12,6 +12,7 @@ export function useSocket() {
   const [roomClosedError, setRoomClosedError] = useState(null)
   const [isSpectator, setIsSpectator] = useState(false)
   const [roomSpectators, setRoomSpectators] = useState([])
+  const [turnTimer, setTurnTimer] = useState(null) // { turnTimerSeconds, startedAt } when server starts countdown
   const socketRef = useRef(null)
   const hasAttemptedRejoin = useRef(false)
   const hasLoadedFromStorage = useRef(false)
@@ -213,12 +214,18 @@ export function useSocket() {
           console.log('[useSocket] New game detected - clearing saved game state between games')
           clearLocalGameState()
         }
-        
+        if (data.gameState.status === 'GAME_OVER' || data.turnTimeout || (data.gameState.currentPlayerIndex !== undefined && data.gameState.players && data.gameState.players[data.gameState.currentPlayerIndex]?.id !== newSocket.id)) {
+          setTurnTimer(null)
+        }
         setGameState(data.gameState)
         if (data.gameState.hostId) {
           setRoomHostId(data.gameState.hostId)
         }
       }
+    })
+
+    newSocket.on('turnTimerStarted', (data) => {
+      setTurnTimer({ turnTimerSeconds: data.turnTimerSeconds, startedAt: data.startedAt })
     })
 
     newSocket.on('cardDrawn', (data) => {
@@ -364,6 +371,8 @@ export function useSocket() {
     clearSavedState,
     clearLocalGameState,
     setIgnoreGameStateUpdates,
-    signalReturnToLobby
+    signalReturnToLobby,
+    turnTimer,
+    setTurnTimer
   }
 }

@@ -1,5 +1,5 @@
 import { roomManager } from '../rooms/roomManager.js'
-import { createGameState, getPublicGameState, getSpectatorGameState, GameStatus } from '../game/gameState.js'
+import { createGameState, getPublicGameState, getSpectatorGameState, GameStatus, TurnPhase, advanceTurn, checkPileClosing, checkWinCondition } from '../game/gameState.js'
 import { 
   handlePlay, 
   handleDrawWithTracking, 
@@ -94,6 +94,160 @@ function emitGameStateToSpectators(io, room, roomCode, extra = {}) {
 // Store pending bot actions
 const botActionTimers = new Map()
 
+// Turn timer: roomCode -> timeoutId (for human players only)
+const turnTimers = new Map()
+
+function clearTurnTimer(roomCode) {
+  if (turnTimers.has(roomCode)) {
+    clearTimeout(turnTimers.get(roomCode))
+    turnTimers.delete(roomCode)
+  }
+}
+
+function startTurnTimer(io, room, roomCode) {
+  const code = room?.code || roomCode
+  clearTurnTimer(code)
+  const seconds = room.settings?.turnTimer
+  if (!seconds || seconds <= 0) return
+  const currentPlayer = room.gameState.players[room.gameState.currentPlayerIndex]
+  const roomPlayer = room.players.find(p => p.id === currentPlayer.id)
+  if (roomPlayer?.isBot) return
+  const timeoutId = setTimeout(() => {
+    turnTimers.delete(code)
+    executeTurnTimeout(io, code)
+  }, seconds * 1000)
+  turnTimers.set(code, timeoutId)
+  io.to(currentPlayer.id).emit('turnTimerStarted', { turnTimerSeconds: seconds, startedAt: Date.now() })
+}
+
+/** Get values a card can represent (for matching). */
+function getCardValues(card) {
+  if (!card) return []
+  if (card.isSplit && card.splitValues) return [...card.splitValues]
+  return [card.value]
+}
+
+/** Find insert position so drawn card is placed next to a matching card (same value), or -1 if no match. */
+function findInsertPositionNextToMatching(hand, drawnCard) {
+  const drawnValues = new Set(getCardValues(drawnCard))
+  if (drawnValues.size === 0) return -1
+  for (let i = 0; i < hand.length; i++) {
+    const card = hand[i]
+    const cardValues = getCardValues(card)
+    if (cardValues.some(v => drawnValues.has(v))) return i
+  }
+  return -1
+}
+
+function executeTurnTimeout(io, roomCode) {
+  const room = roomManager.getRoom(roomCode)
+  if (!room?.gameState || room.gameState.status !== GameStatus.PLAYING) {
+    return
+  }
+  const currentPlayer = room.gameState.players[room.gameState.currentPlayerIndex]
+  if (!currentPlayer) return
+  const roomPlayer = room.players.find(p => p.id === currentPlayer.id)
+  if (roomPlayer?.isBot) return
+
+  const phase = room.gameState.turnPhase
+  const playerId = currentPlayer.id
+  let didAct = false
+  let timeoutMessage = ''
+
+  if (phase === TurnPhase.WAITING_FOR_PLAY_OR_DRAW) {
+    const drawResult = handleDrawWithTracking(room.gameState, playerId)
+    if (drawResult.success) {
+      room.gameState = drawResult.state
+      const player = room.gameState.players.find(p => p.id === playerId)
+      const hand = player.hand || []
+      const drawnCard = room.gameState.drawnCard
+      const insertPos = hand.length > 0 ? findInsertPositionNextToMatching(hand, drawnCard) : -1
+      if (insertPos >= 0) {
+        const insertResult = handleInsertCardWithTracking(room.gameState, playerId, insertPos)
+        if (insertResult.success) {
+          room.gameState = insertResult.state
+          didAct = true
+          timeoutMessage = 'ran out of time – drew and added to hand'
+        }
+      }
+      if (!didAct) {
+        const discardResult = handleDiscardDrawnCardWithTracking(room.gameState, playerId)
+        if (discardResult.success) {
+          room.gameState = discardResult.state
+          didAct = true
+          timeoutMessage = 'ran out of time – drew and discarded'
+        }
+      }
+    } else {
+      room.gameState = advanceTurn(room.gameState)
+      room.gameState = checkPileClosing(room.gameState)
+      room.gameState = checkWinCondition(room.gameState)
+      didAct = true
+      timeoutMessage = 'ran out of time – turn skipped'
+    }
+  } else if (phase === TurnPhase.PROCESSING_DRAW || phase === TurnPhase.RINGO_CHECK) {
+    const player = room.gameState.players.find(p => p.id === playerId)
+    const hand = player?.hand || []
+    const drawnCard = room.gameState.drawnCard
+    const insertPos = hand.length > 0 ? findInsertPositionNextToMatching(hand, drawnCard) : -1
+    if (insertPos >= 0) {
+      const insertResult = handleInsertCardWithTracking(room.gameState, playerId, insertPos)
+      if (insertResult.success) {
+        room.gameState = insertResult.state
+        didAct = true
+        timeoutMessage = 'ran out of time – added drawn card to hand'
+      }
+    }
+    if (!didAct) {
+      const discardResult = handleDiscardDrawnCardWithTracking(room.gameState, playerId)
+      if (discardResult.success) {
+        room.gameState = discardResult.state
+        didAct = true
+        timeoutMessage = 'ran out of time – discarded drawn card'
+      }
+    }
+  }
+
+  if (!didAct) return
+
+  room.updateActivity()
+  const playerName = roomPlayer?.name || 'Player'
+  io.to(room.code).emit('playerNotification', {
+    type: 'info',
+    message: timeoutMessage,
+    playerName,
+    cardInfo: []
+  })
+
+  const previousStatus = room.gameState?.status
+  const winsIncremented = incrementWinnerWins(room, previousStatus)
+  if (room.gameState.status === GameStatus.GAME_OVER && previousStatus !== GameStatus.GAME_OVER) {
+    emitRoomUpdate(io, room)
+  } else if (winsIncremented) {
+    emitRoomUpdate(io, room)
+  }
+  room.players.forEach(p => {
+    if (!p.isBot) {
+      io.to(p.id).emit('gameStateUpdate', {
+        gameState: { ...buildPublicState(room, p.id), roomCode },
+        turnTimeout: true
+      })
+    }
+  })
+  emitGameStateToSpectators(io, room, roomCode)
+  if (room.gameState.status === GameStatus.PLAYING) {
+    processBotTurn(io, room, roomCode)
+  }
+}
+
+function maybeStartTurnTimer(io, room, roomCode) {
+  if (!room?.gameState || room.gameState.status !== GameStatus.PLAYING) return
+  const currentPlayer = room.gameState.players[room.gameState.currentPlayerIndex]
+  const roomPlayer = room.players.find(p => p.id === currentPlayer.id)
+  if (roomPlayer?.isBot) return
+  startTurnTimer(io, room, roomCode)
+}
+
 // Process bot turn with delay for realism
 async function processBotTurn(io, room, roomCode) {
   if (!room || !room.gameState || room.gameState.status !== GameStatus.PLAYING) return
@@ -101,7 +255,10 @@ async function processBotTurn(io, room, roomCode) {
   const currentPlayer = room.gameState.players[room.gameState.currentPlayerIndex]
   const roomPlayer = room.players.find(p => p.id === currentPlayer.id)
   
-  if (!roomPlayer || !roomPlayer.isBot) return
+  if (!roomPlayer || !roomPlayer.isBot) {
+    maybeStartTurnTimer(io, room, roomCode)
+    return
+  }
   
   const botId = currentPlayer.id
   const difficulty = roomPlayer.difficulty || BotDifficulty.EASY
@@ -946,7 +1103,7 @@ export function setupSocketHandlers(io) {
 
         callback({ success: true })
         
-        // Start bot turn if it's a bot's turn
+        // Start bot turn if bot, or turn timer if human
         processBotTurn(io, room, data.roomCode)
       } catch (error) {
         console.error('Error starting game:', error)
@@ -958,6 +1115,7 @@ export function setupSocketHandlers(io) {
       if (!checkRateLimit(socket.id)) {
         return callback({ error: 'Rate limit exceeded' })
       }
+      clearTurnTimer(data.roomCode)
 
       const room = roomManager.getRoom(data.roomCode)
       if (!room) {
@@ -1018,6 +1176,7 @@ export function setupSocketHandlers(io) {
       if (!checkRateLimit(socket.id)) {
         return callback({ error: 'Rate limit exceeded' })
       }
+      clearTurnTimer(data.roomCode)
 
       const room = roomManager.getRoom(data.roomCode)
       if (!room) {
@@ -1070,12 +1229,14 @@ export function setupSocketHandlers(io) {
       emitGameStateToSpectators(io, room, data.roomCode)
 
       callback({ success: true, ringoPossible: result.ringoPossible })
+      startTurnTimer(io, room, data.roomCode)
     })
 
     socket.on('ringo', (data, callback) => {
       if (!checkRateLimit(socket.id)) {
         return callback({ error: 'Rate limit exceeded' })
       }
+      clearTurnTimer(data.roomCode)
 
       const room = roomManager.getRoom(data.roomCode)
       if (!room) {
@@ -1138,6 +1299,7 @@ export function setupSocketHandlers(io) {
       if (!checkRateLimit(socket.id)) {
         return callback({ error: 'Rate limit exceeded' })
       }
+      clearTurnTimer(data.roomCode)
 
       const room = roomManager.getRoom(data.roomCode)
       if (!room) {
@@ -1206,6 +1368,7 @@ export function setupSocketHandlers(io) {
       if (!checkRateLimit(socket.id)) {
         return callback({ error: 'Rate limit exceeded' })
       }
+      clearTurnTimer(data.roomCode)
 
       const room = roomManager.getRoom(data.roomCode)
       if (!room) {
@@ -1272,6 +1435,7 @@ export function setupSocketHandlers(io) {
       if (!checkRateLimit(socket.id)) {
         return callback({ error: 'Rate limit exceeded' })
       }
+      clearTurnTimer(data.roomCode)
 
       const room = roomManager.getRoom(data.roomCode)
       if (!room) {
