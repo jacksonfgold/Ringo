@@ -94,6 +94,8 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
   const [ringoShake, setRingoShake] = useState(false)
   const [botThinking, setBotThinking] = useState(false)
   const [viewingHandPlayer, setViewingHandPlayer] = useState(null)
+  const [showDiscardPileModal, setShowDiscardPileModal] = useState(false)
+  const [showDrawPileModal, setShowDrawPileModal] = useState(false)
 
   // Configure sensors for drag vs click distinction
   const mouseSensor = useSensor(MouseSensor, {
@@ -1066,6 +1068,128 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
             </div>
           )}
 
+          {/* Modal: view discard pile */}
+          {showDiscardPileModal && (
+            <div
+              style={styles.handModalOverlay}
+              onClick={() => setShowDiscardPileModal(false)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => e.key === 'Escape' && setShowDiscardPileModal(false)}
+            >
+              <div style={styles.handModalContent} onClick={(e) => e.stopPropagation()}>
+                <div style={styles.handModalHeader}>
+                  <h3 style={styles.handModalTitle}>Discard pile</h3>
+                  <button
+                    type="button"
+                    style={styles.handModalClose}
+                    onClick={() => setShowDiscardPileModal(false)}
+                    aria-label="Close"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div style={styles.handModalCards}>
+                  {(() => {
+                    const pile = gameState?.discardPile ?? []
+                    const newestFirst = [...pile].reverse()
+                    if (newestFirst.length === 0) {
+                      return <div style={{ color: '#666', fontStyle: 'italic' }}>No cards discarded yet</div>
+                    }
+                    return newestFirst.map((card, cardIdx) => {
+                      const cardColor = card.isSplit
+                        ? `linear-gradient(to right, ${getCardColor(card.splitValues[0])} 0%, ${getCardColor(card.splitValues[0])} 50%, ${getCardColor(card.splitValues[1])} 50%, ${getCardColor(card.splitValues[1])} 100%)`
+                        : getCardColor(card.value)
+                      return (
+                        <div
+                          key={cardIdx}
+                          style={{
+                            ...styles.handModalCard,
+                            background: cardColor
+                          }}
+                        >
+                          {card.isSplit ? (
+                            <div style={styles.splitCardContainer}>
+                              <div style={styles.splitCardValue}>{card.splitValues[0]}</div>
+                              <div style={styles.splitDivider}>/</div>
+                              <div style={styles.splitCardValue}>{card.splitValues[1]}</div>
+                            </div>
+                          ) : (
+                            <div style={styles.cardValue}>{card.value}</div>
+                          )}
+                        </div>
+                      )
+                    })
+                  })()}
+                </div>
+                <div style={{ marginTop: 12, fontSize: 12, color: '#888' }}>
+                  Most recently discarded at top
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Modal: view draw pile (debug only) */}
+          {showDrawPileModal && (
+            <div
+              style={styles.handModalOverlay}
+              onClick={() => setShowDrawPileModal(false)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => e.key === 'Escape' && setShowDrawPileModal(false)}
+            >
+              <div style={styles.handModalContent} onClick={(e) => e.stopPropagation()}>
+                <div style={styles.handModalHeader}>
+                  <h3 style={styles.handModalTitle}>Draw pile</h3>
+                  <button
+                    type="button"
+                    style={styles.handModalClose}
+                    onClick={() => setShowDrawPileModal(false)}
+                    aria-label="Close"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div style={styles.handModalCards}>
+                  {(() => {
+                    const pile = gameState?.drawPile ?? []
+                    const topFirst = [...pile].reverse()
+                    if (topFirst.length === 0) {
+                      return <div style={{ color: '#666', fontStyle: 'italic' }}>Draw pile is empty</div>
+                    }
+                    return topFirst.map((card, cardIdx) => {
+                      const cardColor = card.isSplit
+                        ? `linear-gradient(to right, ${getCardColor(card.splitValues[0])} 0%, ${getCardColor(card.splitValues[0])} 50%, ${getCardColor(card.splitValues[1])} 50%, ${getCardColor(card.splitValues[1])} 100%)`
+                        : getCardColor(card.value)
+                      return (
+                        <div
+                          key={cardIdx}
+                          style={{
+                            ...styles.handModalCard,
+                            background: cardColor
+                          }}
+                        >
+                          {card.isSplit ? (
+                            <div style={styles.splitCardContainer}>
+                              <div style={styles.splitCardValue}>{card.splitValues[0]}</div>
+                              <div style={styles.splitDivider}>/</div>
+                              <div style={styles.splitCardValue}>{card.splitValues[1]}</div>
+                            </div>
+                          ) : (
+                            <div style={styles.cardValue}>{card.value}</div>
+                          )}
+                        </div>
+                      )
+                    })
+                  })()}
+                </div>
+                <div style={{ marginTop: 12, fontSize: 12, color: '#888' }}>
+                  Top of pile (next draw) at top
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Current Combo / Play Area (Hidden when drawnCard active for cleaner look, or just allow stacking) */}
           {!drawnCard && !gameState?.pendingCapture?.cards && (
             <DroppableZone 
@@ -1107,6 +1231,28 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
                 </div>
               )}
             </DroppableZone>
+          )}
+
+          {/* Discard pile / draw pile (debug) buttons */}
+          {gameState?.status === 'PLAYING' && (
+            <div style={{ marginTop: 8, marginBottom: 4, display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+              <button
+                type="button"
+                onClick={() => setShowDiscardPileModal(true)}
+                style={styles.discardPileButton}
+              >
+                View discard pile ({(gameState?.discardPile ?? []).length})
+              </button>
+              {Array.isArray(gameState?.drawPile) && (
+                <button
+                  type="button"
+                  onClick={() => setShowDrawPileModal(true)}
+                  style={styles.discardPileButton}
+                >
+                  View draw pile ({(gameState.drawPile).length})
+                </button>
+              )}
+            </div>
           )}
 
           {/* Current Combo (Small View for Context when Drawn Card active) */}
@@ -2323,6 +2469,17 @@ const styles = {
     fontWeight: '700',
     cursor: 'pointer',
     width: '100%'
+  },
+  discardPileButton: {
+    background: 'transparent',
+    color: 'rgba(255,255,255,0.85)',
+    padding: '6px 12px',
+    fontSize: '14px',
+    borderRadius: '8px',
+    border: '1px solid rgba(255,255,255,0.3)',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'background 0.2s, color 0.2s'
   },
   captureSection: {
     background: 'rgba(255,255,255,0.95)',

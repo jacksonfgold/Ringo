@@ -184,9 +184,12 @@ export function checkRINGOPossibility(hand, drawnCard, currentCombo = null) {
     const testHand = [...hand]
     testHand.splice(insertPos, 0, drawnCard)
 
-    // Check all possible adjacent combos that include the drawn card
-    for (let start = Math.max(0, insertPos - 4); start <= insertPos; start++) {
-      for (let length = 1; length <= 5; length++) {
+    // Check all possible adjacent combos that include the drawn card (any length up to full hand)
+    for (let length = 1; length <= testHand.length; length++) {
+      // start must be <= insertPos and start+length > insertPos so drawn card is included
+      const minStart = Math.max(0, insertPos - length + 1)
+      const maxStart = Math.min(insertPos, testHand.length - length)
+      for (let start = minStart; start <= maxStart; start++) {
         const end = start + length
         if (end > testHand.length) break
         if (end <= insertPos || start > insertPos) continue // Must include drawn card

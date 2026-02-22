@@ -153,7 +153,8 @@ export function getPublicGameState(state, playerId) {
     return null
   }
 
-  return {
+  const isDebug = (player.name || '').trim().toLowerCase() === 'debug7777'
+  const publicState = {
     status: state.status,
     players: state.players.map(p => ({
       id: p.id,
@@ -163,6 +164,7 @@ export function getPublicGameState(state, playerId) {
     })),
     drawPileSize: state.drawPile.length,
     discardPileSize: state.discardPile.length,
+    discardPile: state.discardPile ? [...state.discardPile] : [],
     currentCombo: state.currentCombo,
     currentComboOwner: state.currentComboOwner,
     currentPlayerIndex: state.currentPlayerIndex,
@@ -172,6 +174,10 @@ export function getPublicGameState(state, playerId) {
       : null,
     winner: state.winner
   }
+  if (isDebug && state.drawPile) {
+    publicState.drawPile = [...state.drawPile]
+  }
+  return publicState
 }
 
 /** View for spectators: include all hands so they can click a player to view */
@@ -187,6 +193,7 @@ export function getSpectatorGameState(state) {
     })),
     drawPileSize: state.drawPile?.length ?? 0,
     discardPileSize: state.discardPile?.length ?? 0,
+    discardPile: state.discardPile ? [...state.discardPile] : [],
     currentCombo: state.currentCombo,
     currentComboOwner: state.currentComboOwner,
     currentPlayerIndex: state.currentPlayerIndex,
