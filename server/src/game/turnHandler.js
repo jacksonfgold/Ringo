@@ -1,5 +1,7 @@
 import { updateGameState, getCurrentPlayer, advanceTurn, checkWinCondition, checkPileClosing, shuffleDiscardIntoDraw } from './gameState.js'
 import { validatePlayMove, checkRINGOPossibility, validateCombo, validateBeat } from './moveValidation.js'
+import { applySpecialEffect } from './specialCardEffects.js'
+import { SPECIAL_EFFECTS } from './cardModel.js'
 
 function getResolvedValue(card) {
   if (card.resolvedValue !== undefined && card.resolvedValue !== null) {
@@ -437,10 +439,32 @@ export function handleInsertCardWithTracking(state, playerId, insertPosition) {
   }
 
   const player = state.players.find(p => p.id === playerId)
+  const isSpecial = state.drawnCard.isSpecialCard === true
+
+  if (isSpecial) {
+    const specialHand = player.specialHand || []
+    const pos = Math.max(0, Math.min(insertPosition, specialHand.length))
+    const newSpecialHand = [...specialHand]
+    newSpecialHand.splice(pos, 0, state.drawnCard)
+    const updatedPlayers = state.players.map(p =>
+      p.id === playerId ? { ...p, specialHand: newSpecialHand } : p
+    )
+    let newState = {
+      ...state,
+      players: updatedPlayers,
+      drawnCard: null,
+      drawnCardPlayer: null
+    }
+    newState = advanceTurn(newState)
+    newState = checkPileClosing(newState)
+    newState = checkWinCondition(newState)
+    return { success: true, state: newState, insertedCard: state.drawnCard }
+  }
+
   const newHand = [...player.hand]
   newHand.splice(insertPosition, 0, state.drawnCard)
 
-  const updatedPlayers = state.players.map(p => 
+  const updatedPlayers = state.players.map(p =>
     p.id === playerId ? { ...p, hand: newHand } : p
   )
 
@@ -480,4 +504,55 @@ export function handleDiscardDrawnCardWithTracking(state, playerId) {
   newState = checkWinCondition(newState)
 
   return { success: true, state: newState, discardedCard }
+}
+
+/**
+ * Play one card from the player's special hand (use its effect). Valid only in WAITING_FOR_PLAY_OR_DRAW.
+ * Returns { success, state, payloadForActor }.
+ */
+export function handlePlaySpecialFromHand(state, playerId, specialHandIndex, targetPlayerId = null) {
+  if (state.turnPhase !== TurnPhase.WAITING_FOR_PLAY_OR_DRAW) {
+    return { success: false, error: 'Invalid turn phase', state }
+  }
+  const current = getCurrentPlayer(state)
+  if (!current || current.id !== playerId) {
+    return { success: false, error: 'Not your turn', state }
+  }
+  const player = state.players.find(p => p.id === playerId)
+  const specialHand = player.specialHand || []
+  if (specialHandIndex < 0 || specialHandIndex >= specialHand.length) {
+    return { success: false, error: 'Invalid special card index', state }
+  }
+  const card = specialHand[specialHandIndex]
+  if (!card?.isSpecialCard || !card.effectId) {
+    return { success: false, error: 'Not a special card', state }
+  }
+  const effect = SPECIAL_EFFECTS[card.effectId]
+  if (!effect) {
+    return { success: false, error: 'Unknown effect', state }
+  }
+  if (effect.needsTarget && !targetPlayerId) {
+    return { success: false, error: 'This effect requires a target player', state }
+  }
+
+  const newSpecialHand = specialHand.filter((_, i) => i !== specialHandIndex)
+  let newState = updateGameState(state, {
+    players: state.players.map(p =>
+      p.id === playerId ? { ...p, specialHand: newSpecialHand } : p
+    )
+  })
+
+  const effectResult = applySpecialEffect(newState, playerId, card.effectId, targetPlayerId)
+  if (!effectResult.success) {
+    return { success: false, error: effectResult.error, state }
+  }
+  newState = effectResult.state
+
+  const newDiscardPile = [...newState.discardPile, card]
+  newState = { ...newState, discardPile: newDiscardPile }
+  newState = advanceTurn(newState)
+  newState = checkPileClosing(newState)
+  newState = checkWinCondition(newState)
+
+  return { success: true, state: newState, payloadForActor: effectResult.payloadForActor }
 }

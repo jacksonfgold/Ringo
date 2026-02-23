@@ -6,7 +6,8 @@ import {
   handleRINGOWithTracking,
   handleInsertCardWithTracking,
   handleDiscardDrawnCardWithTracking,
-  handleCaptureDecision
+  handleCaptureDecision,
+  handlePlaySpecialFromHand
 } from '../game/turnHandler.js'
 import { applySpecialEffect } from '../game/specialCardEffects.js'
 import { SPECIAL_EFFECTS } from '../game/cardModel.js'
@@ -294,6 +295,48 @@ async function executeBotTurn(io, room, roomCode, botId, difficulty) {
   const turnPhase = room.gameState.turnPhase
   
   if (turnPhase === 'WAITING_FOR_PLAY_OR_DRAW') {
+    const bot = room.gameState.players.find(p => p.id === botId)
+    const specialHand = (bot?.specialHand || [])
+    const canPlaySpecial = specialHand.length > 0
+    const others = room.gameState.players.filter(p => p.id !== botId && p.id)
+
+    // Sometimes play a special from hand (e.g. ~20% when bot has specials)
+    if (canPlaySpecial && others.length >= 0 && Math.random() < 0.2) {
+      const idx = Math.floor(Math.random() * specialHand.length)
+      const card = specialHand[idx]
+      const effect = SPECIAL_EFFECTS[card?.effectId]
+      const needsTarget = effect?.needsTarget
+      const targetId = needsTarget && others.length > 0 ? others[Math.floor(Math.random() * others.length)].id : null
+      if (!needsTarget || targetId) {
+        const result = handlePlaySpecialFromHand(room.gameState, botId, idx, targetId)
+        if (result.success) {
+          room.gameState = result.state
+          room.updateActivity()
+          const previousStatus = room.gameState?.status
+          const winsIncremented = incrementWinnerWins(room, previousStatus)
+          if (room.gameState.status === GameStatus.GAME_OVER && previousStatus !== GameStatus.GAME_OVER) {
+            emitRoomUpdate(io, room)
+          } else if (winsIncremented) emitRoomUpdate(io, room)
+          room.players.forEach(player => {
+            if (!player.isBot) {
+              io.to(player.id).emit('gameStateUpdate', {
+                gameState: { ...buildPublicState(room, player.id), roomCode }
+              })
+            }
+          })
+          emitGameStateToSpectators(io, room, roomCode)
+          io.to(room.code).emit('playerNotification', {
+            type: 'info',
+            message: 'used a special card',
+            playerName: bot?.name || 'Bot',
+            cardInfo: []
+          })
+          if (room.gameState.status === GameStatus.PLAYING) processBotTurn(io, room, roomCode)
+          return
+        }
+      }
+    }
+
     // Bot decides to play or draw
     const decision = getBotDecision(room.gameState, botId, difficulty, { phase: 'turn', roomCode })
     
@@ -1398,6 +1441,69 @@ export function setupSocketHandlers(io) {
       callback({ success: true })
       
       // Trigger bot turn if needed
+      if (room.gameState.status === GameStatus.PLAYING) {
+        processBotTurn(io, room, data.roomCode)
+      }
+    })
+
+    socket.on('playSpecialFromHand', (data, callback) => {
+      if (!checkRateLimit(socket.id)) {
+        return callback({ error: 'Rate limit exceeded' })
+      }
+      clearTurnTimer(data.roomCode)
+
+      const room = roomManager.getRoom(data.roomCode)
+      if (!room) {
+        socket.emit('roomClosed', { reason: 'Room no longer exists', roomCode: data.roomCode })
+        return callback({ error: 'Room not found' })
+      }
+      if (!room.gameState) {
+        return callback({ error: 'Game not found' })
+      }
+      room.updateActivity()
+
+      const result = handlePlaySpecialFromHand(
+        room.gameState,
+        socket.id,
+        data.specialHandIndex,
+        data.targetPlayerId || null
+      )
+      if (!result.success) {
+        return callback({ error: result.error })
+      }
+
+      room.gameState = result.state
+      room.updateActivity()
+
+      if (result.payloadForActor) {
+        socket.emit('specialCardResult', result.payloadForActor)
+      }
+
+      const player = room.players.find(p => p.id === socket.id)
+      io.to(room.code).except(socket.id).emit('playerNotification', {
+        type: 'info',
+        message: 'used a special card',
+        playerName: player?.name || 'Player',
+        cardInfo: []
+      })
+
+      const previousStatus = room.gameState?.status
+      const winsIncremented = incrementWinnerWins(room, previousStatus)
+      if (room.gameState.status === GameStatus.GAME_OVER && previousStatus !== GameStatus.GAME_OVER) {
+        emitRoomUpdate(io, room)
+      } else if (winsIncremented) {
+        emitRoomUpdate(io, room)
+      }
+
+      room.players.forEach(p => {
+        if (!p.isBot) {
+          io.to(p.id).emit('gameStateUpdate', {
+            gameState: { ...buildPublicState(room, p.id), roomCode: data.roomCode }
+          })
+        }
+      })
+      emitGameStateToSpectators(io, room, data.roomCode)
+      callback({ success: true })
       if (room.gameState.status === GameStatus.PLAYING) {
         processBotTurn(io, room, data.roomCode)
       }

@@ -66,7 +66,6 @@ const SPECIAL_EFFECT_NAMES = {
   PEEK_HAND: 'Peek hand',
   GIVE_RANDOM: 'Give card',
   STEAL_RANDOM: 'Steal',
-  DRAW_TWO: 'Draw 2',
   PEEK_DRAW: 'Peek deck',
   SKIP_NEXT: 'Skip',
   SWAP_HAND: 'Swap hand',
@@ -76,7 +75,6 @@ const SPECIAL_EFFECT_DESCRIPTIONS = {
   PEEK_HAND: "View another player's hand",
   GIVE_RANDOM: 'Give them a random card from your hand',
   STEAL_RANDOM: 'Take a random card from their hand',
-  DRAW_TWO: 'Draw two extra cards from the deck',
   PEEK_DRAW: 'Look at the top 3 cards of the deck',
   SKIP_NEXT: "Skip the next player's turn",
   SWAP_HAND: 'Swap your entire hand with theirs',
@@ -147,6 +145,8 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
   const [turnSecondsRemaining, setTurnSecondsRemaining] = useState(null)
   const [specialCardTargetId, setSpecialCardTargetId] = useState(null)
   const [specialCardResult, setSpecialCardResult] = useState(null)
+  const [useSpecialFromHandMode, setUseSpecialFromHandMode] = useState(false)
+  const [selectedSpecialIndex, setSelectedSpecialIndex] = useState(null)
 
   useEffect(() => {
     if (!turnTimer?.startedAt || turnTimer?.turnTimerSeconds == null) {
@@ -731,6 +731,29 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
     })
   }
 
+  const handlePlaySpecialFromHand = () => {
+    if (selectedSpecialIndex == null || !currentPlayer?.specialHand?.[selectedSpecialIndex]) return
+    const card = currentPlayer.specialHand[selectedSpecialIndex]
+    const needsTarget = card?.effectId && SPECIAL_EFFECTS_NEED_TARGET.includes(card.effectId)
+    if (needsTarget && !specialCardTargetId) {
+      showToast('Select a player first', 'error')
+      return
+    }
+    socket.emit('playSpecialFromHand', {
+      roomCode: effectiveRoomCode,
+      specialHandIndex: selectedSpecialIndex,
+      targetPlayerId: needsTarget ? specialCardTargetId : undefined
+    }, (response) => {
+      if (response?.error) {
+        showToast(response.error, 'error')
+      } else {
+        setUseSpecialFromHandMode(false)
+        setSelectedSpecialIndex(null)
+        setSpecialCardTargetId(null)
+      }
+    })
+  }
+
   const handleSplitResolution = (cardId, value) => {
     setSplitResolutions({ ...splitResolutions, [cardId]: value })
   }
@@ -1195,11 +1218,10 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
                 </div>
               )
             }
-            const labels = { PEEK_HAND: `${r.targetName}'s hand`, PEEK_DRAW: 'Top of deck', DRAW_TWO: 'Drew 2 cards', SKIP_NEXT: 'Turn skipped', SWAP_HAND: 'Hands swapped', GIVE_RANDOM: `Gave a card to ${r.targetName}`, STEAL_RANDOM: `Took a card from ${r.targetName}`, DISCARD_DRAW: 'Discard and draw' }
+            const labels = { PEEK_HAND: `${r.targetName}'s hand`, PEEK_DRAW: 'Top of deck', SKIP_NEXT: 'Turn skipped', SWAP_HAND: 'Hands swapped', GIVE_RANDOM: `Gave a card to ${r.targetName}`, STEAL_RANDOM: `Took a card from ${r.targetName}`, DISCARD_DRAW: 'Discard and draw' }
             const subtitles = {
               PEEK_HAND: r.hand?.length ? 'You peeked at their hand. This is what they have.' : 'You peeked. They have no cards.',
               PEEK_DRAW: 'Left = next card to be drawn. Deck order is unchanged.',
-              DRAW_TWO: 'These 2 cards were added to your hand.',
               SKIP_NEXT: `${r.skippedName}'s turn was skipped. Play continues to the next player.`,
               SWAP_HAND: `You and ${r.targetName} swapped hands. Close to see your new hand.`,
               GIVE_RANDOM: 'This card was removed from your hand and given to them.',
@@ -1218,7 +1240,6 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
                     {r.type === 'PEEK_HAND' && (r.hand?.length > 0 ? r.hand.map((card, i) => <div key={card?.id ?? i} style={{ display: 'inline-block' }}>{renderCard(card)}</div>) : <div style={styles.handModalCountOnly}>Empty hand</div>)}
                     {r.type === 'GIVE_RANDOM' && r.givenCard && <div style={styles.specialResultSingleCardWrap}>{renderCard(r.givenCard, 'highlight')}</div>}
                     {r.type === 'STEAL_RANDOM' && r.stolenCard && <div style={styles.specialResultSingleCardWrap}>{renderCard(r.stolenCard, 'highlight')}</div>}
-                    {r.type === 'DRAW_TWO' && r.drawnCards?.map((card, i) => <div key={card?.id ?? i} style={{ display: 'inline-block' }}>{renderCard(card)}</div>)}
                     {r.type === 'PEEK_DRAW' && r.cards?.map((card, i) => (
                       <div key={i} style={styles.specialResultPeekCardWrap}>
                         <span style={styles.specialResultPeekLabel}>{i === 0 ? 'Drawn next' : i === 1 ? '2nd' : '3rd'}</span>
@@ -1498,7 +1519,7 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
                           showToast('Select a player first', 'error')
                           return
                         }
-                        socket.emit('useSpecialCard', { roomCode, targetPlayerId: specialCardTargetId || undefined }, (res) => {
+                        socket.emit('useSpecialCard', { roomCode: effectiveRoomCode, targetPlayerId: specialCardTargetId || undefined }, (res) => {
                           if (res?.error) showToast(res.error, 'error')
                           else setSpecialCardTargetId(null)
                         })
@@ -1637,6 +1658,82 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
               {insertingCapture && (
                 <div style={styles.captureHint}>Tap a + between cards in your hand to insert this card.</div>
               )}
+            </div>
+          )}
+
+          {/* Special Cards Hand (separate from main hand) */}
+          {currentPlayer && ((currentPlayer.specialHand || []).length > 0 || (insertingCard && drawnCard?.isSpecialCard)) && (
+            <div style={styles.specialHandSection}>
+              <div style={styles.specialHandLabel}>
+                {useSpecialFromHandMode ? 'Click a card to use, then confirm' : 'Special cards'}
+              </div>
+              <div style={{ ...styles.hand, flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
+                {(insertingCard && drawnCard?.isSpecialCard) && (
+                  <DroppableZone
+                    id="special-hand-gap-0"
+                    style={{
+                      ...styles.insertSlot,
+                      width: isMobile ? 44 : 40,
+                      height: isMobile ? 72 : 90,
+                      borderRadius: 8,
+                      background: activeDragId === 'drawn-card' ? 'rgba(46, 204, 113, 0.4)' : 'rgba(0,0,0,0.1)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                    onClick={() => handleInsertCard(0)}
+                  >
+                    +
+                  </DroppableZone>
+                )}
+                {(currentPlayer.specialHand || []).map((card, index) => {
+                  const isSelected = useSpecialFromHandMode && selectedSpecialIndex === index
+                  const needsTarget = card.effectId && SPECIAL_EFFECTS_NEED_TARGET.includes(card.effectId)
+                  return (
+                    <div key={card.id} style={{ display: 'flex', alignItems: 'center' }}>
+                      {(insertingCard && drawnCard?.isSpecialCard) && (
+                        <DroppableZone
+                          id={`special-hand-gap-${index + 1}`}
+                          style={{
+                            ...styles.insertSlot,
+                            width: isMobile ? 44 : 40,
+                            height: isMobile ? 72 : 90,
+                            borderRadius: 8,
+                            background: activeDragId === 'drawn-card' ? 'rgba(46, 204, 113, 0.4)' : 'rgba(0,0,0,0.1)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}
+                          onClick={() => handleInsertCard(index + 1)}
+                        >
+                          +
+                        </DroppableZone>
+                      )}
+                      <div
+                        onClick={() => {
+                          if (useSpecialFromHandMode) {
+                            setSelectedSpecialIndex(index)
+                          }
+                        }}
+                        style={{
+                          ...styles.card,
+                          ...(isMobile ? { width: 48, height: 72, fontSize: 20 } : {}),
+                          background: getCardBackground(card),
+                          color: 'white',
+                          cursor: useSpecialFromHandMode ? 'pointer' : 'default',
+                          ...(isSelected ? styles.selectedCard : {}),
+                          ...styles.handCardSpecial
+                        }}
+                      >
+                        <div style={styles.handCardSpecialInner}>
+                          <span style={styles.handCardSpecialBadge}>Special</span>
+                          <span style={styles.handCardSpecialName}>{SPECIAL_EFFECT_NAMES[card.effectId] || 'Special'}</span>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
             </div>
           )}
 
@@ -1802,7 +1899,35 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
                 gap: 14
               } : {})
             }}>
-              {selectedCards.length > 0 ? (
+              {useSpecialFromHandMode ? (
+                <>
+                  {selectedSpecialIndex != null && currentPlayer?.specialHand?.[selectedSpecialIndex] && SPECIAL_EFFECTS_NEED_TARGET.includes(currentPlayer.specialHand[selectedSpecialIndex].effectId) && (
+                    <select
+                      value={specialCardTargetId || ''}
+                      onChange={(e) => setSpecialCardTargetId(e.target.value || null)}
+                      style={{ ...styles.specialCardTargetSelect, minWidth: 120 }}
+                    >
+                      <option value="">Select player...</option>
+                      {(gameState?.players || []).filter(p => p.id !== socket.id).map(p => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                  )}
+                  <button
+                    onClick={handlePlaySpecialFromHand}
+                    disabled={selectedSpecialIndex == null || (currentPlayer?.specialHand?.[selectedSpecialIndex] && SPECIAL_EFFECTS_NEED_TARGET.includes(currentPlayer.specialHand[selectedSpecialIndex].effectId) && !specialCardTargetId)}
+                    style={{ ...styles.useSpecialButton, ...(isMobile ? { minHeight: 44 } : {}) }}
+                  >
+                    Use this card
+                  </button>
+                  <button
+                    onClick={() => { setUseSpecialFromHandMode(false); setSelectedSpecialIndex(null); setSpecialCardTargetId(null) }}
+                    style={{ ...styles.discardButton, ...(isMobile ? { minHeight: 44 } : {}) }}
+                  >
+                    Cancel
+                  </button>
+                </>
+              ) : selectedCards.length > 0 ? (
                 <button
                   onClick={handlePlay}
                   style={{ ...styles.playButton, ...(isMobile ? { minHeight: 44, padding: '14px 24px', fontSize: 16 } : {}) }}
@@ -1810,9 +1935,19 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
                   Play {selectedCards.length} Card{selectedCards.length !== 1 ? 's' : ''}
                 </button>
               ) : (
-                <button onClick={handleDraw} style={{ ...styles.drawButton, ...(isMobile ? { minHeight: 44, padding: '14px 24px', fontSize: 16 } : {}) }}>
-                  Draw Card
-                </button>
+                <>
+                  {(currentPlayer?.specialHand || []).length > 0 && (
+                    <button
+                      onClick={() => setUseSpecialFromHandMode(true)}
+                      style={{ ...styles.useSpecialButton, ...(isMobile ? { minHeight: 44, padding: '14px 24px', fontSize: 16 } : {}) }}
+                    >
+                      Use special
+                    </button>
+                  )}
+                  <button onClick={handleDraw} style={{ ...styles.drawButton, ...(isMobile ? { minHeight: 44, padding: '14px 24px', fontSize: 16 } : {}) }}>
+                    Draw Card
+                  </button>
+                </>
               )}
             </div>
           )}
@@ -2447,6 +2582,22 @@ const styles = {
     justifyContent: 'center',
     color: 'white',
     boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+  },
+  specialHandSection: {
+    display: 'flex',
+    flexDirection: 'column',
+    marginBottom: 12,
+    padding: '12px 8px',
+    background: 'rgba(0,0,0,0.15)',
+    borderRadius: 12,
+    border: '1px solid rgba(255,255,255,0.15)'
+  },
+  specialHandLabel: {
+    fontSize: 12,
+    fontWeight: 600,
+    marginBottom: 8,
+    color: 'rgba(255,255,255,0.9)',
+    textAlign: 'center'
   },
   handSection: {
     flex: 1,

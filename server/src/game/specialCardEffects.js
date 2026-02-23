@@ -59,39 +59,33 @@ export function applySpecialEffect(state, playerId, effectId, targetPlayerId = n
     }
 
     case 'STEAL_RANDOM': {
-      if (target.hand.length === 0) {
+      const targetHand = target.hand || []
+      if (targetHand.length === 0) {
         return { success: false, error: 'Target has no cards to steal', state }
       }
-      const idx = Math.floor(Math.random() * target.hand.length)
-      const card = target.hand[idx]
-      const newTargetHand = target.hand.filter((_, i) => i !== idx)
-      const newActorHand = [...actor.hand, card]
-      newState = updateGameState(state, {
-        players: state.players.map(p =>
-          p.id === playerId ? { ...p, hand: newActorHand }
-          : p.id === targetPlayerId ? { ...p, hand: newTargetHand }
-          : p
-        )
-      })
-      payloadForActor = { type: 'STEAL_RANDOM', stolenCard: card, targetName: target.name }
-      break
-    }
-
-    case 'DRAW_TWO': {
-      newState = shuffleDiscardIntoDraw(newState)
-      if (newState.drawPile.length < 2) {
-        return { success: false, error: 'Not enough cards to draw', state }
+      const idx = Math.floor(Math.random() * targetHand.length)
+      const card = targetHand[idx]
+      const newTargetHand = targetHand.filter((_, i) => i !== idx)
+      if (card.isSpecialCard) {
+        const newActorSpecial = [...(actor.specialHand || []), card]
+        newState = updateGameState(state, {
+          players: state.players.map(p =>
+            p.id === playerId ? { ...p, specialHand: newActorSpecial }
+            : p.id === targetPlayerId ? { ...p, hand: newTargetHand }
+            : p
+          )
+        })
+      } else {
+        const newActorHand = [...actor.hand, card]
+        newState = updateGameState(state, {
+          players: state.players.map(p =>
+            p.id === playerId ? { ...p, hand: newActorHand }
+            : p.id === targetPlayerId ? { ...p, hand: newTargetHand }
+            : p
+          )
+        })
       }
-      const pile = [...newState.drawPile]
-      const drawn = [pile.pop(), pile.pop()]
-      const newHand = [...actor.hand, ...drawn]
-      newState = updateGameState(newState, {
-        drawPile: pile,
-        players: state.players.map(p =>
-          p.id === playerId ? { ...p, hand: newHand } : p
-        )
-      })
-      payloadForActor = { type: 'DRAW_TWO', drawnCards: drawn }
+      payloadForActor = { type: 'STEAL_RANDOM', stolenCard: card, targetName: target.name }
       break
     }
 
@@ -112,11 +106,13 @@ export function applySpecialEffect(state, playerId, effectId, targetPlayerId = n
 
     case 'SWAP_HAND': {
       const actorHand = [...actor.hand]
+      const actorSpecial = [...(actor.specialHand || [])]
       const targetHand = [...target.hand]
+      const targetSpecial = [...(target.specialHand || [])]
       newState = updateGameState(state, {
         players: state.players.map(p =>
-          p.id === playerId ? { ...p, hand: targetHand }
-          : p.id === targetPlayerId ? { ...p, hand: actorHand }
+          p.id === playerId ? { ...p, hand: targetHand, specialHand: targetSpecial }
+          : p.id === targetPlayerId ? { ...p, hand: actorHand, specialHand: actorSpecial }
           : p
         )
       })

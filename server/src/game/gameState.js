@@ -31,6 +31,7 @@ export function createGameState(players, previousWinner = null, settings = {}) {
     id: player.id,
     name: player.name,
     hand: [],
+    specialHand: [],
     handSize: 0
   }))
 
@@ -183,7 +184,9 @@ export function getPublicGameState(state, playerId) {
       id: p.id,
       name: p.name,
       handSize: p.id === playerId ? p.hand.length : p.hand.length,
-      hand: p.id === playerId ? p.hand : undefined
+      hand: p.id === playerId ? p.hand : undefined,
+      specialHandSize: (p.specialHand || []).length,
+      specialHand: p.id === playerId ? (p.specialHand || []) : undefined
     })),
     drawPileSize: state.drawPile.length,
     discardPileSize: state.discardPile.length,
@@ -212,7 +215,9 @@ export function getSpectatorGameState(state) {
       id: p.id,
       name: p.name,
       handSize: p.hand?.length ?? 0,
-      hand: p.hand ?? []
+      hand: p.hand ?? [],
+      specialHandSize: (p.specialHand || []).length,
+      specialHand: p.specialHand ?? []
     })),
     drawPileSize: state.drawPile?.length ?? 0,
     discardPileSize: state.discardPile?.length ?? 0,

@@ -3,7 +3,6 @@ export const SPECIAL_EFFECTS = {
   PEEK_HAND: { name: 'Peek hand', needsTarget: true, desc: "View another player's hand" },
   GIVE_RANDOM: { name: 'Give card', needsTarget: true, desc: 'Give another player a random card from your hand' },
   STEAL_RANDOM: { name: 'Steal', needsTarget: true, desc: 'Take a random card from another player' },
-  DRAW_TWO: { name: 'Draw 2', needsTarget: false, desc: 'Draw two cards from the deck' },
   PEEK_DRAW: { name: 'Peek deck', needsTarget: false, desc: 'Look at the top 3 cards of the draw pile' },
   SKIP_NEXT: { name: 'Skip', needsTarget: false, desc: "Skip the next player's turn" },
   SWAP_HAND: { name: 'Swap hand', needsTarget: true, desc: 'Swap your hand with another player' },
@@ -73,7 +72,7 @@ export function createDeck(settings = {}) {
   // Special cards (only in Chaos / special-cards mode)
   if (settings.specialCardsMode) {
     const effectIds = Object.keys(SPECIAL_EFFECTS)
-    const copiesPerEffect = 2
+    const copiesPerEffect = 6
     for (const effectId of effectIds) {
       for (let i = 0; i < copiesPerEffect; i++) {
         deck.push(new Card(cardId++, 0, false, null, true, effectId))
