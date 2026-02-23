@@ -5,7 +5,7 @@ import GameBoard from './components/GameBoard'
 import { ToastContainer } from './components/Toast'
 
 function App() {
-  const { socket, connected, gameState, roomPlayers, roomCode, roomHostId, setRoomCode, setPlayerName, clearSavedState, clearLocalGameState, setGameState, roomClosedError, setRoomClosedError, signalReturnToLobby, isSpectator, setIsSpectator, setRoomSpectators, roomSpectators, turnTimer } = useSocket()
+  const { socket, connected, gameState, roomPlayers, roomCode, roomHostId, setRoomCode, setPlayerName, clearSavedState, clearLocalGameState, setGameState, roomClosedError, setRoomClosedError, signalReturnToLobby, isSpectator, setIsSpectator, setRoomSpectators, roomSpectators, roomSettings, turnTimer } = useSocket()
   const [connectionTimeout, setConnectionTimeout] = useState(false)
   const [showGame, setShowGame] = useState(false)
   const [returningToLobby, setReturningToLobby] = useState(false)
@@ -87,7 +87,7 @@ function App() {
 
   return (
     <>
-      <RoomLobby socket={socket} gameState={gameState} roomCode={roomCode} roomPlayers={roomPlayers} roomHostId={roomHostId} setRoomCode={setRoomCode} setPlayerName={setPlayerName} clearSavedState={clearSavedState} setGameState={setGameState} roomClosedError={roomClosedError} setRoomClosedError={setRoomClosedError} setIsSpectator={setIsSpectator} setRoomSpectators={setRoomSpectators} roomSpectators={roomSpectators} />
+      <RoomLobby socket={socket} gameState={gameState} roomCode={roomCode} roomPlayers={roomPlayers} roomHostId={roomHostId} roomSettings={roomSettings} setRoomCode={setRoomCode} setPlayerName={setPlayerName} clearSavedState={clearSavedState} setGameState={setGameState} roomClosedError={roomClosedError} setRoomClosedError={setRoomClosedError} setIsSpectator={setIsSpectator} setRoomSpectators={setRoomSpectators} roomSpectators={roomSpectators} />
       <ToastContainer />
     </>
   )

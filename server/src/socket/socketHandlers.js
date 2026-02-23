@@ -382,7 +382,30 @@ emitRoomUpdate(io, room)
       // Draw
       const result = handleDrawWithTracking(room.gameState, botId)
       
-      if (result.success) {
+      if (!result.success && result.error === 'No cards to draw') {
+        room.gameState = advanceTurn(result.state)
+        room.gameState = checkPileClosing(room.gameState)
+        room.gameState = checkWinCondition(room.gameState)
+        room.updateActivity()
+        const botName = room.players.find(p => p.id === botId)?.name || 'Bot'
+        io.to(room.code).emit('playerNotification', {
+          type: 'info',
+          message: 'was skipped (no cards to draw)',
+          playerName: botName,
+          cardInfo: []
+        })
+        room.players.forEach(player => {
+          if (!player.isBot) {
+            io.to(player.id).emit('gameStateUpdate', {
+              gameState: { ...buildPublicState(room, player.id), roomCode }
+            })
+          }
+        })
+        emitGameStateToSpectators(io, room, roomCode)
+        if (room.gameState.status === GameStatus.PLAYING) {
+          processBotTurn(io, room, roomCode)
+        }
+      } else if (result.success) {
         room.gameState = result.state
         room.updateActivity()
         
@@ -761,11 +784,13 @@ export function setupSocketHandlers(io) {
         const room = roomManager.createRoom(socket.id, data.playerName || 'Player')
         room.updateActivity()
         socket.join(room.code)
+        emitRoomUpdate(io, room)
         callback({ 
           success: true, 
           roomCode: room.code,
           players: room.players,
-          hostId: room.hostId
+          hostId: room.hostId,
+          settings: room.settings || {}
         })
       } catch (error) {
         callback({ error: error.message })
@@ -1314,6 +1339,44 @@ export function setupSocketHandlers(io) {
       const result = handleDrawWithTracking(room.gameState, socket.id)
 
       if (!result.success) {
+        if (result.error === 'No cards to draw') {
+          const skippedState = advanceTurn(result.state)
+          const afterPile = checkPileClosing(skippedState)
+          const afterWin = checkWinCondition(afterPile)
+          room.gameState = afterWin
+          room.updateActivity()
+          const player = room.players.find(p => p.id === socket.id)
+          const playerName = player?.name || 'Player'
+          socket.emit('skippedNoCards', {
+            message: "No cards left to draw! You've been skipped. Better luck next time 😏"
+          })
+          io.to(room.code).except(socket.id).emit('playerNotification', {
+            type: 'info',
+            message: 'was skipped (no cards to draw)',
+            playerName,
+            cardInfo: []
+          })
+          const previousStatus = room.gameState?.status
+          const winsIncremented = incrementWinnerWins(room, previousStatus)
+          if (room.gameState.status === GameStatus.GAME_OVER && previousStatus !== GameStatus.GAME_OVER) {
+            emitRoomUpdate(io, room)
+          } else if (winsIncremented) {
+            emitRoomUpdate(io, room)
+          }
+          room.players.forEach(p => {
+            if (!p.isBot) {
+              io.to(p.id).emit('gameStateUpdate', {
+                gameState: { ...buildPublicState(room, p.id), roomCode: data.roomCode }
+              })
+            }
+          })
+          emitGameStateToSpectators(io, room, data.roomCode)
+          callback({ success: true, skipped: true })
+          if (room.gameState.status === GameStatus.PLAYING) {
+            processBotTurn(io, room, data.roomCode)
+          }
+          return
+        }
         return callback({ error: result.error })
       }
 

@@ -4,7 +4,7 @@ import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, v
 import { CSS } from '@dnd-kit/utilities'
 import { showToast } from './Toast'
 
-export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHostId = null, roomCode: initialRoomCode, setRoomCode: setRoomCodeProp, setPlayerName: setPlayerNameProp, clearSavedState, setGameState: setGameStateProp, roomClosedError, setRoomClosedError, setIsSpectator, setRoomSpectators, roomSpectators = [] }) {
+export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHostId = null, roomCode: initialRoomCode, roomSettings: roomSettingsProp = null, setRoomCode: setRoomCodeProp, setPlayerName: setPlayerNameProp, clearSavedState, setGameState: setGameStateProp, roomClosedError, setRoomClosedError, setIsSpectator, setRoomSpectators, roomSpectators = [] }) {
   const [roomCode, setRoomCode] = useState(initialRoomCode || '')
   const [joinCode, setJoinCode] = useState('')
   const [players, setPlayers] = useState([])
@@ -197,6 +197,13 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
       }
     }
   }, [roomHostId, socket?.id])
+
+  // Persist game settings between rounds: sync from server (roomSettings) into lobby form state
+  useEffect(() => {
+    if (roomCode && roomSettingsProp && typeof roomSettingsProp === 'object' && Object.keys(roomSettingsProp).length > 0) {
+      setGameSettings(prev => ({ handSize: null, turnTimer: 0, specialCardsMode: false, ...prev, ...roomSettingsProp }))
+    }
+  }, [roomCode, roomSettingsProp])
 
   // Sync players list from app-level roomPlayers (useSocket) - this is the source of truth
   useEffect(() => {

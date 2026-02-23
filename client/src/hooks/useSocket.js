@@ -12,6 +12,7 @@ export function useSocket() {
   const [roomClosedError, setRoomClosedError] = useState(null)
   const [isSpectator, setIsSpectator] = useState(false)
   const [roomSpectators, setRoomSpectators] = useState([])
+  const [roomSettings, setRoomSettings] = useState(null) // persisted game settings for the room (handSize, turnTimer, specialCardsMode)
   const [turnTimer, setTurnTimer] = useState(null) // { turnTimerSeconds, startedAt } when server starts countdown
   const socketRef = useRef(null)
   const hasAttemptedRejoin = useRef(false)
@@ -158,6 +159,9 @@ export function useSocket() {
       if (data.hostId !== undefined) {
         setRoomHostId(data.hostId)
       }
+      if (data.settings !== undefined && typeof data.settings === 'object') {
+        setRoomSettings(prev => ({ handSize: null, turnTimer: 0, specialCardsMode: false, ...prev, ...data.settings }))
+      }
     })
 
     newSocket.on('roomClosed', (data) => {
@@ -165,6 +169,7 @@ export function useSocket() {
       userReturnedToLobby.current = false
       setIsSpectator(false)
       setRoomSpectators([])
+      setRoomSettings(null)
       // Clear all room-related state
       clearSavedState()
       setRoomClosedError(data.reason || 'Room has been closed')
@@ -362,6 +367,7 @@ export function useSocket() {
     roomClosedError,
     isSpectator,
     roomSpectators,
+    roomSettings,
     setRoomClosedError,
     setRoomCode,
     setPlayerName,

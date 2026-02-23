@@ -402,11 +402,15 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
 
     socket.on('cardDrawn', handleCardDrawn)
     socket.on('gameStateUpdate', handleGameStateUpdate)
+    socket.on('skippedNoCards', (data) => {
+      showToast(data.message || "You've been skipped!", 'info')
+    })
 
     return () => {
       socket.off('specialCardResult')
       socket.off('cardDrawn', handleCardDrawn)
       socket.off('gameStateUpdate', handleGameStateUpdate)
+      socket.off('skippedNoCards')
     }
   }, [socket])
 
