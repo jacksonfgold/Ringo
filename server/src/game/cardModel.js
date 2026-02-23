@@ -1,12 +1,14 @@
-/** Special card effect ids. When drawn, player uses the effect (or discards the card). */
+/** Special card effect ids. Effects are designed around the goal: empty your hand first.
+ *  Good: reduce your cards (Give, Discard one) or disrupt others (Skip, Force discard). */
 export const SPECIAL_EFFECTS = {
   PEEK_HAND: { name: 'Peek hand', needsTarget: true, desc: "View another player's hand" },
   GIVE_RANDOM: { name: 'Give card', needsTarget: true, desc: 'Give another player a random card from your hand' },
-  STEAL_RANDOM: { name: 'Steal', needsTarget: true, desc: 'Take a random card from another player' },
   PEEK_DRAW: { name: 'Peek deck', needsTarget: false, desc: 'Look at the top 3 cards of the draw pile' },
   SKIP_NEXT: { name: 'Skip', needsTarget: false, desc: "Skip the next player's turn" },
   SWAP_HAND: { name: 'Swap hand', needsTarget: true, desc: 'Swap your hand with another player' },
-  DISCARD_DRAW: { name: 'Discard & draw', needsTarget: false, desc: 'Discard your hand and draw the same number' }
+  DISCARD_DRAW: { name: 'Discard & draw', needsTarget: false, desc: 'Discard your hand and draw the same number' },
+  DISCARD_ONE: { name: 'Discard one', needsTarget: false, desc: 'Discard one card from your hand' },
+  FORCE_DISCARD: { name: 'Force discard', needsTarget: true, desc: 'Target player discards a random card from their hand' }
 }
 
 export class Card {

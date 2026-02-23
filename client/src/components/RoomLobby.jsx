@@ -21,6 +21,7 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
   const [showSettings, setShowSettings] = useState(false)
   const [editingBotId, setEditingBotId] = useState(null)
   const [editingBotName, setEditingBotName] = useState('')
+  const [kickedMessage, setKickedMessage] = useState(null)
   const [gameSettings, setGameSettings] = useState({
     handSize: null,
     turnTimer: 0,
@@ -165,14 +166,26 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
       if (setRoomClosedError) setRoomClosedError(data.reason || 'Room has been closed')
     }
 
+    const onKickedFromRoom = (data) => {
+      setKickedMessage(data.message || "You've been kicked from the room. Bye! 👢")
+      if (setRoomCodeProp) setRoomCodeProp('')
+      setRoomCode('')
+      setPlayers([])
+      setIsHost(false)
+      setHostId(null)
+      if (clearSavedState) clearSavedState()
+    }
+
     socket.on('roomUpdate', onRoomUpdate)
     socket.on('roomSettingsUpdate', onRoomSettingsUpdate)
     socket.on('roomClosed', onRoomClosed)
+    socket.on('kickedFromRoom', onKickedFromRoom)
 
     return () => {
       socket.off('roomUpdate', onRoomUpdate)
       socket.off('roomSettingsUpdate', onRoomSettingsUpdate)
       socket.off('roomClosed', onRoomClosed)
+      socket.off('kickedFromRoom', onKickedFromRoom)
     }
   }, [socket, clearSavedState, setRoomClosedError])
 
@@ -529,6 +542,15 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
               ✕
             </button>
           )}
+          {!isBot && isHostEffective && gameState?.status !== 'PLAYING' && player.id !== socket?.id && (
+            <button
+              onClick={() => handleKickPlayer(player.id)}
+              style={styles.kickPlayerButton}
+              title="Kick player"
+            >
+              👢 Kick
+            </button>
+          )}
         </div>
       </div>
     )
@@ -565,6 +587,16 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
         showToast(response.error || 'Failed to remove bot', 'error')
       } else {
         showToast('Bot removed', 'success')
+      }
+    })
+  }
+
+  const handleKickPlayer = (playerIdToKick) => {
+    socket.emit('kickPlayer', { roomCode, playerIdToKick }, (response) => {
+      if (response?.error) {
+        showToast(response.error, 'error')
+      } else {
+        showToast('Player kicked', 'success')
       }
     })
   }
@@ -653,6 +685,64 @@ export default function RoomLobby({ socket, gameState, roomPlayers = [], roomHos
       setShowNameInput(true)
     }
   }, [roomClosedError, roomCode, clearSavedState])
+
+  if (kickedMessage) {
+    return (
+      <div
+        style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 9999,
+          background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 24
+        }}
+        role="alert"
+      >
+        <div style={{ fontSize: 72, marginBottom: 16 }}>👢😤</div>
+        <h2 style={{
+          color: '#ff6b6b',
+          fontSize: 28,
+          fontWeight: 900,
+          textAlign: 'center',
+          textTransform: 'uppercase',
+          textShadow: '0 0 20px rgba(255, 107, 107, 0.8)',
+          margin: '0 0 12px'
+        }}>
+          YOU'VE BEEN KICKED!!!
+        </h2>
+        <p style={{
+          color: 'rgba(255,255,255,0.9)',
+          fontSize: 18,
+          textAlign: 'center',
+          maxWidth: 360,
+          margin: '0 0 24px',
+          lineHeight: 1.4
+        }}>
+          {kickedMessage}
+        </p>
+        <button
+          onClick={() => setKickedMessage(null)}
+          style={{
+            background: 'linear-gradient(135deg, #ff6b6b 0%, #ee5a5a 100%)',
+            color: 'white',
+            border: 'none',
+            borderRadius: 12,
+            padding: '14px 28px',
+            fontSize: 18,
+            fontWeight: 700,
+            cursor: 'pointer',
+            boxShadow: '0 4px 20px rgba(255, 107, 107, 0.5)'
+          }}
+        >
+          OK, I get it 😢
+        </button>
+      </div>
+    )
+  }
 
   if (roomCode) {
     return (
@@ -1433,6 +1523,18 @@ const styles = {
     fontSize: '12px',
     fontWeight: '700',
     transition: 'all 0.2s'
+  },
+  kickPlayerButton: {
+    background: 'linear-gradient(135deg, #ff6b6b 0%, #ee5a5a 100%)',
+    color: 'white',
+    border: 'none',
+    borderRadius: 8,
+    padding: '6px 10px',
+    fontSize: 12,
+    fontWeight: 700,
+    cursor: 'pointer',
+    marginLeft: 8,
+    boxShadow: '0 2px 8px rgba(255, 107, 107, 0.4)'
   },
   editableBotName: {
     cursor: 'pointer',

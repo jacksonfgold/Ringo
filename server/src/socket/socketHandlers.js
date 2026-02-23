@@ -904,6 +904,44 @@ export function setupSocketHandlers(io) {
       }
     })
 
+    socket.on('kickPlayer', (data, callback) => {
+      if (!checkRateLimit(socket.id)) {
+        return callback({ error: 'Rate limit exceeded' })
+      }
+      const room = roomManager.getRoom(data.roomCode)
+      if (!room) {
+        return callback({ error: 'Room not found' })
+      }
+      if (room.hostId !== socket.id) {
+        return callback({ error: 'Only the host can kick players' })
+      }
+      const playerIdToKick = data.playerIdToKick
+      if (playerIdToKick === socket.id) {
+        return callback({ error: "You can't kick yourself" })
+      }
+      const inRoom = room.players.some(p => p.id === playerIdToKick)
+      if (!inRoom) {
+        return callback({ error: 'Player not in room' })
+      }
+      if (room.gameState?.status === 'PLAYING') {
+        return callback({ error: "Can't kick during a game" })
+      }
+      const kickedSocket = io.sockets.sockets.get(playerIdToKick)
+      const updatedRoom = roomManager.leaveRoom(data.roomCode, playerIdToKick)
+      if (kickedSocket) {
+        kickedSocket.leave(data.roomCode)
+        kickedSocket.emit('kickedFromRoom', {
+          roomCode: data.roomCode,
+          message: "YOU'VE BEEN KICKED!!! 😤 The host didn't want you here. Bye bye! 👢"
+        })
+      }
+      if (updatedRoom) {
+        updatedRoom.updateActivity()
+        emitRoomUpdate(io, updatedRoom)
+      }
+      callback({ success: true })
+    })
+
     // Add bot to room
     socket.on('addBot', (data, callback) => {
       if (!checkRateLimit(socket.id)) {

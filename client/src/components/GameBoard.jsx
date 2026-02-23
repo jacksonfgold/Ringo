@@ -65,24 +65,26 @@ const getCardColor = (value) => {
 const SPECIAL_EFFECT_NAMES = {
   PEEK_HAND: 'Peek hand',
   GIVE_RANDOM: 'Give card',
-  STEAL_RANDOM: 'Steal',
   PEEK_DRAW: 'Peek deck',
   SKIP_NEXT: 'Skip',
   SWAP_HAND: 'Swap hand',
-  DISCARD_DRAW: 'Discard & draw'
+  DISCARD_DRAW: 'Discard & draw',
+  DISCARD_ONE: 'Discard one',
+  FORCE_DISCARD: 'Force discard'
 }
 const SPECIAL_EFFECT_DESCRIPTIONS = {
   PEEK_HAND: "View another player's hand",
   GIVE_RANDOM: 'Give them a random card from your hand',
-  STEAL_RANDOM: 'Take a random card from their hand',
   PEEK_DRAW: 'Look at the top 3 cards of the deck',
   SKIP_NEXT: "Skip the next player's turn",
   SWAP_HAND: 'Swap your entire hand with theirs',
-  DISCARD_DRAW: 'Discard your hand, then draw that many'
+  DISCARD_DRAW: 'Discard your hand, then draw that many',
+  DISCARD_ONE: 'Discard one card from your hand',
+  FORCE_DISCARD: 'They discard a random card from their hand'
 }
 const SPECIAL_CARD_COLOR = '#5B21B6'
 const SPECIAL_CARD_GRADIENT = 'linear-gradient(160deg, #5B21B6 0%, #7C3AED 50%, #6D28D9 100%)'
-const SPECIAL_EFFECTS_NEED_TARGET = ['PEEK_HAND', 'GIVE_RANDOM', 'STEAL_RANDOM', 'SWAP_HAND']
+const SPECIAL_EFFECTS_NEED_TARGET = ['PEEK_HAND', 'GIVE_RANDOM', 'SWAP_HAND', 'FORCE_DISCARD']
 
 const getDrawnCardBackground = (card) => {
   if (!card) return '#7F8C8D'
@@ -1218,15 +1220,16 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
                 </div>
               )
             }
-            const labels = { PEEK_HAND: `${r.targetName}'s hand`, PEEK_DRAW: 'Top of deck', SKIP_NEXT: 'Turn skipped', SWAP_HAND: 'Hands swapped', GIVE_RANDOM: `Gave a card to ${r.targetName}`, STEAL_RANDOM: `Took a card from ${r.targetName}`, DISCARD_DRAW: 'Discard and draw' }
+            const labels = { PEEK_HAND: `${r.targetName}'s hand`, PEEK_DRAW: 'Top of deck', SKIP_NEXT: 'Turn skipped', SWAP_HAND: 'Hands swapped', GIVE_RANDOM: `Gave a card to ${r.targetName}`, DISCARD_DRAW: 'Discard and draw', DISCARD_ONE: 'Discard one', FORCE_DISCARD: `${r.targetName} discarded a card` }
             const subtitles = {
               PEEK_HAND: r.hand?.length ? 'You peeked at their hand. This is what they have.' : 'You peeked. They have no cards.',
               PEEK_DRAW: 'Left = next card to be drawn. Deck order is unchanged.',
               SKIP_NEXT: `${r.skippedName}'s turn was skipped. Play continues to the next player.`,
               SWAP_HAND: `You and ${r.targetName} swapped hands. Close to see your new hand.`,
               GIVE_RANDOM: 'This card was removed from your hand and given to them.',
-              STEAL_RANDOM: 'This card was added to your hand.',
-              DISCARD_DRAW: r.drawnCards?.length ? `You discarded your hand and drew ${r.drawnCards.length} new cards.` : 'You discarded your hand and drew new cards.'
+              DISCARD_DRAW: r.drawnCards?.length ? `You discarded your hand and drew ${r.drawnCards.length} new cards.` : 'You discarded your hand and drew new cards.',
+              DISCARD_ONE: 'One card was discarded from your hand.',
+              FORCE_DISCARD: `A card was discarded from ${r.targetName}'s hand.`
             }
             return (
               <div style={styles.handModalOverlay} onClick={() => setSpecialCardResult(null)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Escape' && setSpecialCardResult(null)}>
@@ -1239,7 +1242,8 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
                   <div style={styles.handModalCards}>
                     {r.type === 'PEEK_HAND' && (r.hand?.length > 0 ? r.hand.map((card, i) => <div key={card?.id ?? i} style={{ display: 'inline-block' }}>{renderCard(card)}</div>) : <div style={styles.handModalCountOnly}>Empty hand</div>)}
                     {r.type === 'GIVE_RANDOM' && r.givenCard && <div style={styles.specialResultSingleCardWrap}>{renderCard(r.givenCard, 'highlight')}</div>}
-                    {r.type === 'STEAL_RANDOM' && r.stolenCard && <div style={styles.specialResultSingleCardWrap}>{renderCard(r.stolenCard, 'highlight')}</div>}
+                    {r.type === 'DISCARD_ONE' && r.discardedCard && <div style={styles.specialResultSingleCardWrap}>{renderCard(r.discardedCard, 'highlight')}</div>}
+                    {r.type === 'FORCE_DISCARD' && r.discardedCard && <div style={styles.specialResultSingleCardWrap}>{renderCard(r.discardedCard, 'highlight')}</div>}
                     {r.type === 'PEEK_DRAW' && r.cards?.map((card, i) => (
                       <div key={i} style={styles.specialResultPeekCardWrap}>
                         <span style={styles.specialResultPeekLabel}>{i === 0 ? 'Drawn next' : i === 1 ? '2nd' : '3rd'}</span>

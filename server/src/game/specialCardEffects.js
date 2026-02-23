@@ -58,34 +58,40 @@ export function applySpecialEffect(state, playerId, effectId, targetPlayerId = n
       break
     }
 
-    case 'STEAL_RANDOM': {
+    case 'DISCARD_ONE': {
+      if (actor.hand.length === 0) {
+        return { success: false, error: 'You have no cards to discard', state }
+      }
+      const idx = Math.floor(Math.random() * actor.hand.length)
+      const card = actor.hand[idx]
+      const newActorHand = actor.hand.filter((_, i) => i !== idx)
+      const newDiscardPile = [...state.discardPile, card]
+      newState = updateGameState(state, {
+        discardPile: newDiscardPile,
+        players: state.players.map(p =>
+          p.id === playerId ? { ...p, hand: newActorHand } : p
+        )
+      })
+      payloadForActor = { type: 'DISCARD_ONE', discardedCard: card }
+      break
+    }
+
+    case 'FORCE_DISCARD': {
       const targetHand = target.hand || []
       if (targetHand.length === 0) {
-        return { success: false, error: 'Target has no cards to steal', state }
+        return { success: false, error: 'Target has no cards to discard', state }
       }
       const idx = Math.floor(Math.random() * targetHand.length)
       const card = targetHand[idx]
       const newTargetHand = targetHand.filter((_, i) => i !== idx)
-      if (card.isSpecialCard) {
-        const newActorSpecial = [...(actor.specialHand || []), card]
-        newState = updateGameState(state, {
-          players: state.players.map(p =>
-            p.id === playerId ? { ...p, specialHand: newActorSpecial }
-            : p.id === targetPlayerId ? { ...p, hand: newTargetHand }
-            : p
-          )
-        })
-      } else {
-        const newActorHand = [...actor.hand, card]
-        newState = updateGameState(state, {
-          players: state.players.map(p =>
-            p.id === playerId ? { ...p, hand: newActorHand }
-            : p.id === targetPlayerId ? { ...p, hand: newTargetHand }
-            : p
-          )
-        })
-      }
-      payloadForActor = { type: 'STEAL_RANDOM', stolenCard: card, targetName: target.name }
+      const newDiscardPile = [...state.discardPile, card]
+      newState = updateGameState(state, {
+        discardPile: newDiscardPile,
+        players: state.players.map(p =>
+          p.id === targetPlayerId ? { ...p, hand: newTargetHand } : p
+        )
+      })
+      payloadForActor = { type: 'FORCE_DISCARD', targetName: target.name, discardedCard: card }
       break
     }
 
