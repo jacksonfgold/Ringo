@@ -26,7 +26,7 @@ export function createGameState(players, previousWinner = null, settings = {}) {
     handSize = defaultHandSize
   }
 
-  const deck = createDeck()
+  const fullDeck = createDeck(settings)
   const gamePlayers = players.map((player, index) => ({
     id: player.id,
     name: player.name,
@@ -34,14 +34,28 @@ export function createGameState(players, previousWinner = null, settings = {}) {
     handSize: 0
   }))
 
+  let dealDeck = fullDeck
+  if (settings.specialCardsMode) {
+    const normal = fullDeck.filter(c => !c.isSpecialCard)
+    const special = fullDeck.filter(c => c.isSpecialCard)
+    dealDeck = normal
+    fullDeck.length = 0
+    fullDeck.push(...shuffleDeck([...normal.slice(handSize * gamePlayers.length), ...special]))
+  }
+
   // Deal cards
+  let dealIndex = 0
   for (let i = 0; i < handSize; i++) {
     for (const player of gamePlayers) {
-      if (deck.length > 0) {
-        player.hand.push(deck.pop())
+      if (dealIndex < dealDeck.length) {
+        player.hand.push(dealDeck[dealIndex++])
       }
     }
   }
+
+  const drawPile = settings.specialCardsMode
+    ? fullDeck
+    : dealDeck.slice(dealIndex)
 
   // Set hand sizes
   gamePlayers.forEach(player => {
@@ -64,7 +78,7 @@ export function createGameState(players, previousWinner = null, settings = {}) {
   return {
     status: GameStatus.PLAYING,
     players: gamePlayers,
-    drawPile: deck,
+    drawPile,
     discardPile: [],
     currentCombo: null,
     currentComboOwner: null,
@@ -96,10 +110,19 @@ export function getPlayerIndex(state, playerId) {
 
 export function advanceTurn(state) {
   const nextIndex = (state.currentPlayerIndex + 1) % state.players.length
-  return updateGameState(state, {
+  let newState = updateGameState(state, {
     currentPlayerIndex: nextIndex,
     turnPhase: TurnPhase.WAITING_FOR_PLAY_OR_DRAW
   })
+  // Skip next player if SKIP_NEXT special was used
+  if (newState.skippedPlayerId && newState.players[nextIndex]?.id === newState.skippedPlayerId) {
+    const skipNext = (nextIndex + 1) % state.players.length
+    newState = updateGameState(newState, {
+      currentPlayerIndex: skipNext,
+      skippedPlayerId: null
+    })
+  }
+  return newState
 }
 
 export function checkWinCondition(state) {

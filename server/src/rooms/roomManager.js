@@ -10,9 +10,7 @@ class Room {
     this.settings = {
       handSize: null,
       turnTimer: 0,
-      autoStart: false,
-      allowRINGO: true,
-      spectatorMode: false
+      specialCardsMode: false
     }
     this.createdAt = Date.now()
     this.lastActivity = Date.now() // Track last activity for cleanup
@@ -176,9 +174,7 @@ class RoomManager {
     if (!room) {
       throw new Error('Room not found')
     }
-    if (!room.settings.spectatorMode) {
-      throw new Error('Spectator mode is not enabled for this room')
-    }
+    // Spectators are always allowed
     if (room.spectators.find(s => s.id === spectatorId)) {
       return room // already spectating
     }

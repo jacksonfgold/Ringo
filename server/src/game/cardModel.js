@@ -1,12 +1,27 @@
+/** Special card effect ids. When drawn, player uses the effect (or discards the card). */
+export const SPECIAL_EFFECTS = {
+  PEEK_HAND: { name: 'Peek hand', needsTarget: true, desc: "View another player's hand" },
+  GIVE_RANDOM: { name: 'Give card', needsTarget: true, desc: 'Give another player a random card from your hand' },
+  STEAL_RANDOM: { name: 'Steal', needsTarget: true, desc: 'Take a random card from another player' },
+  DRAW_TWO: { name: 'Draw 2', needsTarget: false, desc: 'Draw two cards from the deck' },
+  PEEK_DRAW: { name: 'Peek deck', needsTarget: false, desc: 'Look at the top 3 cards of the draw pile' },
+  SKIP_NEXT: { name: 'Skip', needsTarget: false, desc: "Skip the next player's turn" },
+  SWAP_HAND: { name: 'Swap hand', needsTarget: true, desc: 'Swap your hand with another player' },
+  DISCARD_DRAW: { name: 'Discard & draw', needsTarget: false, desc: 'Discard your hand and draw the same number' }
+}
+
 export class Card {
-  constructor(id, value, isSplit = false, splitValues = null) {
+  constructor(id, value, isSplit = false, splitValues = null, isSpecialCard = false, effectId = null) {
     this.id = id
     this.value = value
     this.isSplit = isSplit
     this.splitValues = splitValues || (isSplit ? [value] : null)
+    this.isSpecialCard = isSpecialCard ?? false
+    this.effectId = effectId ?? null
   }
 
   resolveValue(chosenValue = null) {
+    if (this.isSpecialCard) return this.value
     if (!this.isSplit) {
       return this.value
     }
@@ -17,6 +32,7 @@ export class Card {
   }
 
   canResolveTo(value) {
+    if (this.isSpecialCard) return false
     if (!this.isSplit) {
       return this.value === value
     }
@@ -32,12 +48,11 @@ export class Card {
   }
 }
 
-export function createDeck() {
+export function createDeck(settings = {}) {
   const deck = []
   let cardId = 0
 
   // Standard cards (values 1-8), 8 of each
-  // Total: 8 values × 8 cards = 64 standard cards
   const standardValues = [1, 2, 3, 4, 5, 6, 7, 8]
   const cardsPerValue = 8
 
@@ -47,11 +62,22 @@ export function createDeck() {
     }
   })
 
-  // Split cards: 2 of each 1/2, 3/4, 5/6, 7/8 (8 total) — colors from getCardColor per value
+  // Split cards: 2 of each 1/2, 3/4, 5/6, 7/8 (8 total)
   const splitPairs = [[1, 2], [3, 4], [5, 6], [7, 8]]
   for (const [low, high] of splitPairs) {
     for (let i = 0; i < 2; i++) {
       deck.push(new Card(cardId++, low, true, [low, high]))
+    }
+  }
+
+  // Special cards (only in Chaos / special-cards mode)
+  if (settings.specialCardsMode) {
+    const effectIds = Object.keys(SPECIAL_EFFECTS)
+    const copiesPerEffect = 2
+    for (const effectId of effectIds) {
+      for (let i = 0; i < copiesPerEffect; i++) {
+        deck.push(new Card(cardId++, 0, false, null, true, effectId))
+      }
     }
   }
 
@@ -68,5 +94,12 @@ export function shuffleDeck(deck) {
 }
 
 export function createCardFromData(data) {
-  return new Card(data.id, data.value, data.isSplit, data.splitValues)
+  return new Card(
+    data.id,
+    data.value,
+    data.isSplit,
+    data.splitValues,
+    data.isSpecialCard,
+    data.effectId
+  )
 }

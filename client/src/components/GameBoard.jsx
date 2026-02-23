@@ -61,6 +61,54 @@ const getCardColor = (value) => {
   return colors[value] || '#7F8C8D'
 }
 
+// Special card effect display (match server SPECIAL_EFFECTS)
+const SPECIAL_EFFECT_NAMES = {
+  PEEK_HAND: 'Peek hand',
+  GIVE_RANDOM: 'Give card',
+  STEAL_RANDOM: 'Steal',
+  DRAW_TWO: 'Draw 2',
+  PEEK_DRAW: 'Peek deck',
+  SKIP_NEXT: 'Skip',
+  SWAP_HAND: 'Swap hand',
+  DISCARD_DRAW: 'Discard & draw'
+}
+const SPECIAL_EFFECT_DESCRIPTIONS = {
+  PEEK_HAND: "View another player's hand",
+  GIVE_RANDOM: 'Give them a random card from your hand',
+  STEAL_RANDOM: 'Take a random card from their hand',
+  DRAW_TWO: 'Draw two extra cards from the deck',
+  PEEK_DRAW: 'Look at the top 3 cards of the deck',
+  SKIP_NEXT: "Skip the next player's turn",
+  SWAP_HAND: 'Swap your entire hand with theirs',
+  DISCARD_DRAW: 'Discard your hand, then draw that many'
+}
+const SPECIAL_CARD_COLOR = '#5B21B6'
+const SPECIAL_CARD_GRADIENT = 'linear-gradient(160deg, #5B21B6 0%, #7C3AED 50%, #6D28D9 100%)'
+const SPECIAL_EFFECTS_NEED_TARGET = ['PEEK_HAND', 'GIVE_RANDOM', 'STEAL_RANDOM', 'SWAP_HAND']
+
+const getDrawnCardBackground = (card) => {
+  if (!card) return '#7F8C8D'
+  if (card.isSpecialCard) return SPECIAL_CARD_GRADIENT
+  if (card.isSplit) return `linear-gradient(to right, ${getCardColor(card.splitValues[0])} 0%, ${getCardColor(card.splitValues[0])} 50%, ${getCardColor(card.splitValues[1])} 50%, ${getCardColor(card.splitValues[1])} 100%)`
+  return getCardColor(card.value)
+}
+const getDrawnCardLabel = (card) => {
+  if (!card) return ''
+  if (card.isSpecialCard) return SPECIAL_EFFECT_NAMES[card.effectId] || card.effectId || 'Special'
+  if (card.isSplit) return `${card.splitValues[0]}/${card.splitValues[1]}`
+  return String(card.value)
+}
+const getSpecialCardDescription = (effectId) =>
+  SPECIAL_EFFECT_DESCRIPTIONS[effectId] || 'Use this card for its effect.'
+
+/** Background for any card (hand, combo, modal). Handles special, split, normal. */
+const getCardBackground = (card) => {
+  if (!card) return '#7F8C8D'
+  if (card.isSpecialCard) return SPECIAL_CARD_GRADIENT
+  if (card.isSplit) return `linear-gradient(to right, ${getCardColor(card.splitValues[0])} 0%, ${getCardColor(card.splitValues[0])} 50%, ${getCardColor(card.splitValues[1])} 50%, ${getCardColor(card.splitValues[1])} 100%)`
+  return getCardColor(card.value)
+}
+
 export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [], onGoHome, isSpectator = false, turnTimer = null }) {
   const [selectedCards, setSelectedCards] = useState([])
   const [splitResolutions, setSplitResolutions] = useState({})
@@ -97,6 +145,8 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
   const [showDiscardPileModal, setShowDiscardPileModal] = useState(false)
   const [showDrawPileModal, setShowDrawPileModal] = useState(false)
   const [turnSecondsRemaining, setTurnSecondsRemaining] = useState(null)
+  const [specialCardTargetId, setSpecialCardTargetId] = useState(null)
+  const [specialCardResult, setSpecialCardResult] = useState(null)
 
   useEffect(() => {
     if (!turnTimer?.startedAt || turnTimer?.turnTimerSeconds == null) {
@@ -183,7 +233,7 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
     let possible = null
     indices.forEach(idx => {
       const card = currentPlayer.hand[idx]
-      const values = card.isSplit ? new Set(card.splitValues) : new Set([card.value])
+      const values = card.isSpecialCard ? new Set([0]) : card.isSplit ? new Set(card.splitValues) : new Set([card.value])
       if (possible === null) {
         possible = values
       } else {
@@ -324,6 +374,8 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
           setRingoPossible(false)
           setRingoInfo(null)
           setRingoMode(false)
+          setSpecialCardTargetId(null)
+          setInsertingCard(false)
         }
         
         // Only clear selected cards if it's not our turn anymore
@@ -342,10 +394,15 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
       }
     }
 
+    socket.on('specialCardResult', (payload) => {
+      setSpecialCardResult(payload)
+    })
+
     socket.on('cardDrawn', handleCardDrawn)
     socket.on('gameStateUpdate', handleGameStateUpdate)
 
     return () => {
+      socket.off('specialCardResult')
       socket.off('cardDrawn', handleCardDrawn)
       socket.off('gameStateUpdate', handleGameStateUpdate)
     }
@@ -362,6 +419,7 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
 
   const getCardPossibleValues = (card) => {
     if (!card) return []
+    if (card.isSpecialCard) return [0] // special cards play as value 0 (single or with other specials)
     return card.isSplit ? card.splitValues : [card.value]
   }
 
@@ -641,6 +699,7 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
       if (!response.success) {
         soundManager.playInvalidMove()
         showToast(response.error || 'Failed to insert card', 'error')
+        setInsertingCard(false)
       } else {
         setInsertingCard(false)
       }
@@ -764,16 +823,11 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
             <div style={styles.winningPlaySection}>
               <div style={styles.winningPlayLabel}>Winning Play</div>
               <div style={styles.winningComboCards}>
-                {gameState.currentCombo.map((card, idx) => {
-                  const cardColor = card.isSplit 
-                    ? `linear-gradient(to right, ${getCardColor(card.splitValues[0])} 0%, ${getCardColor(card.splitValues[0])} 50%, ${getCardColor(card.splitValues[1])} 50%, ${getCardColor(card.splitValues[1])} 100%)`
-                    : getCardColor(card.value)
-                  return (
-                    <div key={idx} style={{ ...styles.winningComboCard, background: cardColor }}>
-                      {card.isSplit ? `${card.splitValues[0]}/${card.splitValues[1]}` : card.value}
-                    </div>
-                  )
-                })}
+                {gameState.currentCombo.map((card, idx) => (
+                  <div key={card?.id ?? idx} style={{ ...styles.winningComboCard, background: getCardBackground(card) }}>
+                    {card.isSpecialCard ? (SPECIAL_EFFECT_NAMES[card.effectId] || 'Special') : card.isSplit ? `${card.splitValues[0]}/${card.splitValues[1]}` : card.value}
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -842,6 +896,22 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
 
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+      <style>{`
+        @keyframes useSpecialBtnGlow {
+          0%, 100% { box-shadow: 0 0 16px rgba(124, 58, 237, 0.6), 0 0 28px rgba(139, 92, 246, 0.4); }
+          50% { box-shadow: 0 0 24px rgba(124, 58, 237, 0.9), 0 0 40px rgba(139, 92, 246, 0.5); }
+        }
+        .use-special-btn-glow {
+          animation: useSpecialBtnGlow 2s ease-in-out infinite;
+        }
+        .use-special-btn-glow:hover {
+          transform: scale(1.03);
+          filter: brightness(1.08);
+        }
+        .use-special-btn-glow:active {
+          transform: scale(0.98);
+        }
+      `}</style>
       <NotificationSystem socket={socket} />
       <div 
         style={{
@@ -1022,22 +1092,21 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
                   </div>
                   {showAllCards ? (
                     <div style={styles.playerCardsDisplay}>
-                      {player.hand.map((card, cardIdx) => {
-                        const cardColor = card.isSplit 
-                          ? `linear-gradient(to right, ${getCardColor(card.splitValues[0])} 0%, ${getCardColor(card.splitValues[0])} 50%, ${getCardColor(card.splitValues[1])} 50%, ${getCardColor(card.splitValues[1])} 100%)`
-                          : getCardColor(card.value)
-                        return (
-                          <div 
-                            key={cardIdx} 
-                            style={{
-                              ...styles.playerCardMini,
-                              background: cardColor
-                            }}
-                          >
-                            {card.isSplit ? `${card.splitValues[0]}/${card.splitValues[1]}` : card.value}
-                          </div>
-                        )
-                      })}
+                      {player.hand.map((card, cardIdx) => (
+                        <div
+                          key={card?.id ?? cardIdx}
+                          style={{
+                            ...styles.playerCardMini,
+                            background: getCardBackground(card)
+                          }}
+                        >
+                          {card.isSpecialCard ? (
+                            <div style={styles.playerCardMiniSpecial}>
+                              <span style={styles.playerCardMiniSpecialLabel}>{SPECIAL_EFFECT_NAMES[card.effectId] || 'Special'}</span>
+                            </div>
+                          ) : card.isSplit ? `${card.splitValues[0]}/${card.splitValues[1]}` : card.value}
+                        </div>
+                      ))}
                     </div>
                   ) : (
                     <div style={styles.cardCount}>{handSize} cards{canViewHand ? ' · Tap to view' : ''}</div>
@@ -1073,30 +1142,30 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
                 </div>
                 <div style={styles.handModalCards}>
                   {viewingHandPlayer.hand && Array.isArray(viewingHandPlayer.hand) && viewingHandPlayer.hand.length > 0 ? (
-                    viewingHandPlayer.hand.map((card, cardIdx) => {
-                      const cardColor = card.isSplit
-                        ? `linear-gradient(to right, ${getCardColor(card.splitValues[0])} 0%, ${getCardColor(card.splitValues[0])} 50%, ${getCardColor(card.splitValues[1])} 50%, ${getCardColor(card.splitValues[1])} 100%)`
-                        : getCardColor(card.value)
-                      return (
-                        <div
-                          key={cardIdx}
-                          style={{
-                            ...styles.handModalCard,
-                            background: cardColor
-                          }}
-                        >
-                          {card.isSplit ? (
-                            <div style={styles.splitCardContainer}>
-                              <div style={styles.splitCardValue}>{card.splitValues[0]}</div>
-                              <div style={styles.splitDivider}>/</div>
-                              <div style={styles.splitCardValue}>{card.splitValues[1]}</div>
-                            </div>
-                          ) : (
-                            <div style={styles.cardValue}>{card.value}</div>
-                          )}
-                        </div>
-                      )
-                    })
+                    viewingHandPlayer.hand.map((card, cardIdx) => (
+                      <div
+                        key={card?.id ?? cardIdx}
+                        style={{
+                          ...styles.handModalCard,
+                          background: getCardBackground(card)
+                        }}
+                      >
+                        {card.isSpecialCard ? (
+                          <div style={styles.specialCardChip}>
+                            <span style={styles.specialCardChipBadge}>Special</span>
+                            <span style={styles.specialCardChipName}>{SPECIAL_EFFECT_NAMES[card.effectId] || 'Special'}</span>
+                          </div>
+                        ) : card.isSplit ? (
+                          <div style={styles.splitCardContainer}>
+                            <div style={styles.splitCardValue}>{card.splitValues[0]}</div>
+                            <div style={styles.splitDivider}>/</div>
+                            <div style={styles.splitCardValue}>{card.splitValues[1]}</div>
+                          </div>
+                        ) : (
+                          <div style={styles.cardValue}>{card.value}</div>
+                        )}
+                      </div>
+                    ))
                   ) : (
                     <div style={styles.handModalCountOnly}>
                       {(viewingHandPlayer.handSize ?? viewingHandPlayer.hand?.length ?? 0) || 0} cards (hidden)
@@ -1106,6 +1175,63 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
               </div>
             </div>
           )}
+
+          {/* Modal: special card result — per-effect UI */}
+          {specialCardResult && (() => {
+            const r = specialCardResult
+            const renderCard = (card, size = 'normal') => {
+              const cardColor = card.isSpecialCard ? SPECIAL_CARD_GRADIENT : card.isSplit
+                ? `linear-gradient(to right, ${getCardColor(card.splitValues?.[0])} 0%, ${getCardColor(card.splitValues?.[0])} 50%, ${getCardColor(card.splitValues?.[1])} 50%, ${getCardColor(card.splitValues?.[1])} 100%)`
+                : getCardColor(card.value)
+              const style = size === 'highlight' ? { ...styles.handModalCard, ...styles.specialResultSingleCard } : styles.handModalCard
+              return (
+                <div style={{ ...style, background: cardColor }}>
+                  {card.isSpecialCard ? (
+                    <div style={styles.specialCardChip}>
+                      <span style={styles.specialCardChipBadge}>Special</span>
+                      <span style={styles.specialCardChipName}>{SPECIAL_EFFECT_NAMES[card.effectId] || 'Special'}</span>
+                    </div>
+                  ) : card.isSplit ? `${card.splitValues[0]}/${card.splitValues[1]}` : card.value}
+                </div>
+              )
+            }
+            const labels = { PEEK_HAND: `${r.targetName}'s hand`, PEEK_DRAW: 'Top of deck', DRAW_TWO: 'Drew 2 cards', SKIP_NEXT: 'Turn skipped', SWAP_HAND: 'Hands swapped', GIVE_RANDOM: `Gave a card to ${r.targetName}`, STEAL_RANDOM: `Took a card from ${r.targetName}`, DISCARD_DRAW: 'Discard and draw' }
+            const subtitles = {
+              PEEK_HAND: r.hand?.length ? 'You peeked at their hand. This is what they have.' : 'You peeked. They have no cards.',
+              PEEK_DRAW: 'Left = next card to be drawn. Deck order is unchanged.',
+              DRAW_TWO: 'These 2 cards were added to your hand.',
+              SKIP_NEXT: `${r.skippedName}'s turn was skipped. Play continues to the next player.`,
+              SWAP_HAND: `You and ${r.targetName} swapped hands. Close to see your new hand.`,
+              GIVE_RANDOM: 'This card was removed from your hand and given to them.',
+              STEAL_RANDOM: 'This card was added to your hand.',
+              DISCARD_DRAW: r.drawnCards?.length ? `You discarded your hand and drew ${r.drawnCards.length} new cards.` : 'You discarded your hand and drew new cards.'
+            }
+            return (
+              <div style={styles.handModalOverlay} onClick={() => setSpecialCardResult(null)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Escape' && setSpecialCardResult(null)}>
+                <div style={styles.handModalContent} onClick={(e) => e.stopPropagation()}>
+                  <div style={styles.handModalHeader}>
+                    <h3 style={styles.handModalTitle}>{labels[r.type]}</h3>
+                    <button type="button" style={styles.handModalClose} onClick={() => setSpecialCardResult(null)} aria-label="Close">✕</button>
+                  </div>
+                  {subtitles[r.type] && <p style={styles.specialResultSubtitle}>{subtitles[r.type]}</p>}
+                  <div style={styles.handModalCards}>
+                    {r.type === 'PEEK_HAND' && (r.hand?.length > 0 ? r.hand.map((card, i) => <div key={card?.id ?? i} style={{ display: 'inline-block' }}>{renderCard(card)}</div>) : <div style={styles.handModalCountOnly}>Empty hand</div>)}
+                    {r.type === 'GIVE_RANDOM' && r.givenCard && <div style={styles.specialResultSingleCardWrap}>{renderCard(r.givenCard, 'highlight')}</div>}
+                    {r.type === 'STEAL_RANDOM' && r.stolenCard && <div style={styles.specialResultSingleCardWrap}>{renderCard(r.stolenCard, 'highlight')}</div>}
+                    {r.type === 'DRAW_TWO' && r.drawnCards?.map((card, i) => <div key={card?.id ?? i} style={{ display: 'inline-block' }}>{renderCard(card)}</div>)}
+                    {r.type === 'PEEK_DRAW' && r.cards?.map((card, i) => (
+                      <div key={i} style={styles.specialResultPeekCardWrap}>
+                        <span style={styles.specialResultPeekLabel}>{i === 0 ? 'Drawn next' : i === 1 ? '2nd' : '3rd'}</span>
+                        {renderCard(card)}
+                      </div>
+                    ))}
+                    {r.type === 'DISCARD_DRAW' && r.drawnCards?.map((card, i) => <div key={card?.id ?? i} style={{ display: 'inline-block' }}>{renderCard(card)}</div>)}
+                    {(r.type === 'SKIP_NEXT' || r.type === 'SWAP_HAND') && <p style={styles.specialResultMessage}>Close when ready.</p>}
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
 
           {/* Modal: view discard pile */}
           {showDiscardPileModal && (
@@ -1135,30 +1261,30 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
                     if (newestFirst.length === 0) {
                       return <div style={{ color: '#666', fontStyle: 'italic' }}>No cards discarded yet</div>
                     }
-                    return newestFirst.map((card, cardIdx) => {
-                      const cardColor = card.isSplit
-                        ? `linear-gradient(to right, ${getCardColor(card.splitValues[0])} 0%, ${getCardColor(card.splitValues[0])} 50%, ${getCardColor(card.splitValues[1])} 50%, ${getCardColor(card.splitValues[1])} 100%)`
-                        : getCardColor(card.value)
-                      return (
-                        <div
-                          key={cardIdx}
-                          style={{
-                            ...styles.handModalCard,
-                            background: cardColor
-                          }}
-                        >
-                          {card.isSplit ? (
-                            <div style={styles.splitCardContainer}>
-                              <div style={styles.splitCardValue}>{card.splitValues[0]}</div>
-                              <div style={styles.splitDivider}>/</div>
-                              <div style={styles.splitCardValue}>{card.splitValues[1]}</div>
-                            </div>
-                          ) : (
-                            <div style={styles.cardValue}>{card.value}</div>
-                          )}
-                        </div>
-                      )
-                    })
+                    return newestFirst.map((card, cardIdx) => (
+                      <div
+                        key={card?.id ?? cardIdx}
+                        style={{
+                          ...styles.handModalCard,
+                          background: getCardBackground(card)
+                        }}
+                      >
+                        {card.isSpecialCard ? (
+                          <div style={styles.specialCardChip}>
+                            <span style={styles.specialCardChipBadge}>Special</span>
+                            <span style={styles.specialCardChipName}>{SPECIAL_EFFECT_NAMES[card.effectId] || 'Special'}</span>
+                          </div>
+                        ) : card.isSplit ? (
+                          <div style={styles.splitCardContainer}>
+                            <div style={styles.splitCardValue}>{card.splitValues[0]}</div>
+                            <div style={styles.splitDivider}>/</div>
+                            <div style={styles.splitCardValue}>{card.splitValues[1]}</div>
+                          </div>
+                        ) : (
+                          <div style={styles.cardValue}>{card.value}</div>
+                        )}
+                      </div>
+                    ))
                   })()}
                 </div>
                 <div style={{ marginTop: 12, fontSize: 12, color: '#888' }}>
@@ -1196,30 +1322,30 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
                     if (topFirst.length === 0) {
                       return <div style={{ color: '#666', fontStyle: 'italic' }}>Draw pile is empty</div>
                     }
-                    return topFirst.map((card, cardIdx) => {
-                      const cardColor = card.isSplit
-                        ? `linear-gradient(to right, ${getCardColor(card.splitValues[0])} 0%, ${getCardColor(card.splitValues[0])} 50%, ${getCardColor(card.splitValues[1])} 50%, ${getCardColor(card.splitValues[1])} 100%)`
-                        : getCardColor(card.value)
-                      return (
-                        <div
-                          key={cardIdx}
-                          style={{
-                            ...styles.handModalCard,
-                            background: cardColor
-                          }}
-                        >
-                          {card.isSplit ? (
-                            <div style={styles.splitCardContainer}>
-                              <div style={styles.splitCardValue}>{card.splitValues[0]}</div>
-                              <div style={styles.splitDivider}>/</div>
-                              <div style={styles.splitCardValue}>{card.splitValues[1]}</div>
-                            </div>
-                          ) : (
-                            <div style={styles.cardValue}>{card.value}</div>
-                          )}
-                        </div>
-                      )
-                    })
+                    return topFirst.map((card, cardIdx) => (
+                      <div
+                        key={card?.id ?? cardIdx}
+                        style={{
+                          ...styles.handModalCard,
+                          background: getCardBackground(card)
+                        }}
+                      >
+                        {card.isSpecialCard ? (
+                          <div style={styles.specialCardChip}>
+                            <span style={styles.specialCardChipBadge}>Special</span>
+                            <span style={styles.specialCardChipName}>{SPECIAL_EFFECT_NAMES[card.effectId] || 'Special'}</span>
+                          </div>
+                        ) : card.isSplit ? (
+                          <div style={styles.splitCardContainer}>
+                            <div style={styles.splitCardValue}>{card.splitValues[0]}</div>
+                            <div style={styles.splitDivider}>/</div>
+                            <div style={styles.splitCardValue}>{card.splitValues[1]}</div>
+                          </div>
+                        ) : (
+                          <div style={styles.cardValue}>{card.value}</div>
+                        )}
+                      </div>
+                    ))
                   })()}
                 </div>
                 <div style={{ marginTop: 12, fontSize: 12, color: '#888' }}>
@@ -1251,16 +1377,11 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
                     })()}
                   </div>
                   <div style={styles.comboCards}>
-                    {gameState.currentCombo.map((card, idx) => {
-                      const cardColor = card.isSplit 
-                        ? `linear-gradient(to right, ${getCardColor(card.splitValues[0])} 0%, ${getCardColor(card.splitValues[0])} 50%, ${getCardColor(card.splitValues[1])} 50%, ${getCardColor(card.splitValues[1])} 100%)`
-                        : getCardColor(card.value)
-                      return (
-                        <div key={idx} style={{ ...styles.comboCard, background: cardColor }}>
-                          {card.isSplit ? `${card.splitValues[0]}/${card.splitValues[1]}` : card.value}
-                        </div>
-                      )
-                    })}
+                    {gameState.currentCombo.map((card, idx) => (
+                      <div key={card?.id ?? idx} style={{ ...styles.comboCard, background: getCardBackground(card) }}>
+                        {card.isSpecialCard ? (SPECIAL_EFFECT_NAMES[card.effectId] || 'Special') : card.isSplit ? `${card.splitValues[0]}/${card.splitValues[1]}` : card.value}
+                      </div>
+                    ))}
                   </div>
                 </>
               )}
@@ -1299,16 +1420,11 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
              <div style={styles.miniCombo}>
                <div style={styles.miniComboLabel}>Current Combo to Beat:</div>
                <div style={styles.miniComboCards}>
-                 {gameState.currentCombo.map((card, idx) => {
-                    const cardColor = card.isSplit 
-                      ? `linear-gradient(to right, ${getCardColor(card.splitValues[0])} 0%, ${getCardColor(card.splitValues[0])} 50%, ${getCardColor(card.splitValues[1])} 50%, ${getCardColor(card.splitValues[1])} 100%)`
-                      : getCardColor(card.value)
-                    return (
-                      <div key={idx} style={{ ...styles.miniComboCard, background: cardColor }}>
-                        {card.isSplit ? `${card.splitValues[0]}/${card.splitValues[1]}` : card.value}
-                      </div>
-                    )
-                 })}
+                 {gameState.currentCombo.map((card, idx) => (
+                   <div key={card?.id ?? idx} style={{ ...styles.miniComboCard, background: getCardBackground(card) }}>
+                     {card.isSpecialCard ? (SPECIAL_EFFECT_NAMES[card.effectId] || 'Special') : card.isSplit ? `${card.splitValues[0]}/${card.splitValues[1]}` : card.value}
+                   </div>
+                 ))}
                </div>
              </div>
           )}
@@ -1319,17 +1435,22 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
               <div style={styles.drawnCardLabel}>Drawn Card</div>
               <DraggableCard 
                 id="drawn-card" 
-                disabled={!insertingCard && !ringoMode} 
+                disabled={!drawnCard.isSpecialCard && !insertingCard && !ringoMode} 
               >
                 <div style={{
                   ...styles.drawnCard,
-                  background: drawnCard.isSplit 
-                    ? `linear-gradient(to right, ${getCardColor(drawnCard.splitValues[0])} 0%, ${getCardColor(drawnCard.splitValues[0])} 50%, ${getCardColor(drawnCard.splitValues[1])} 50%, ${getCardColor(drawnCard.splitValues[1])} 100%)`
-                    : getCardColor(drawnCard.value),
+                  ...(drawnCard.isSpecialCard ? styles.drawnCardSpecial : {}),
+                  background: getDrawnCardBackground(drawnCard),
                   color: 'white',
-                  cursor: (insertingCard || ringoMode) ? 'grab' : 'default'
+                  cursor: (drawnCard.isSpecialCard || insertingCard || ringoMode) ? 'grab' : 'default'
                 }}>
-                  {drawnCard.isSplit ? (
+                  {drawnCard.isSpecialCard ? (
+                    <div style={styles.specialCardInner}>
+                      <span style={styles.specialCardBadge}>Special</span>
+                      <span style={styles.specialCardName}>{getDrawnCardLabel(drawnCard)}</span>
+                      <span style={styles.specialCardDesc}>{getSpecialCardDescription(drawnCard.effectId)}</span>
+                    </div>
+                  ) : drawnCard.isSplit ? (
                     <div style={styles.splitCardContainer}>
                       <div style={styles.splitCardValue}>{drawnCard.splitValues[0]}</div>
                       <div style={styles.splitDivider}>/</div>
@@ -1340,10 +1461,66 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
                   )}
                 </div>
               </DraggableCard>
+
+              {drawnCard.isSpecialCard && (
+                <p style={styles.specialCardHint}>
+                  {getSpecialCardDescription(drawnCard.effectId)}
+                </p>
+              )}
               
               {/* Action Buttons */}
               <div style={styles.drawnCardActions}>
-                {ringoMode ? (
+                {drawnCard.isSpecialCard ? (
+                  // Special card: Use (maybe with target), Add to Hand, or Discard
+                  <>
+                    {SPECIAL_EFFECTS_NEED_TARGET.includes(drawnCard.effectId) && (
+                      <div style={styles.specialCardTargetRow}>
+                        <label style={styles.specialCardTargetLabel}>Choose target player</label>
+                        <select
+                          value={specialCardTargetId || ''}
+                          onChange={(e) => setSpecialCardTargetId(e.target.value || null)}
+                          style={styles.specialCardTargetSelect}
+                        >
+                          <option value="">Select player...</option>
+                          {(gameState?.players || [])
+                            .filter(p => p.id !== socket.id)
+                            .map(p => (
+                              <option key={p.id} value={p.id}>{p.name}</option>
+                            ))}
+                        </select>
+                      </div>
+                    )}
+                    <button
+                      className="use-special-btn-glow"
+                      onClick={() => {
+                        const needsTarget = SPECIAL_EFFECTS_NEED_TARGET.includes(drawnCard.effectId)
+                        if (needsTarget && !specialCardTargetId) {
+                          showToast('Select a player first', 'error')
+                          return
+                        }
+                        socket.emit('useSpecialCard', { roomCode, targetPlayerId: specialCardTargetId || undefined }, (res) => {
+                          if (res?.error) showToast(res.error, 'error')
+                          else setSpecialCardTargetId(null)
+                        })
+                      }}
+                      style={styles.useSpecialButton}
+                    >
+                      Use
+                    </button>
+                    <button
+                      onClick={() => setInsertingCard(!insertingCard)}
+                      style={{
+                        ...styles.insertButton,
+                        background: insertingCard ? '#e74c3c' : '#2ecc71'
+                      }}
+                    >
+                      {insertingCard ? 'Cancel' : 'Add to Hand'}
+                    </button>
+                    <button onClick={handleDiscardCard} style={styles.discardButton}>
+                      Discard
+                    </button>
+                  </>
+                ) : ringoMode ? (
                   // RINGO Mode Actions
                   <>
                     <button 
@@ -1408,25 +1585,21 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
               <div style={styles.captureLabel}>You won the previous combo!</div>
               <div style={styles.captureComboPreview}>
                 {gameState.pendingCapture.cards.map((card, idx) => {
-                  const cardColor = card.isSplit 
-                    ? `linear-gradient(to right, ${getCardColor(card.splitValues[0])} 0%, ${getCardColor(card.splitValues[0])} 50%, ${getCardColor(card.splitValues[1])} 50%, ${getCardColor(card.splitValues[1])} 100%)`
-                    : getCardColor(card.value)
                   const isBeingInserted = insertingCapture === card.id
-                  
                   return (
                     <DraggableCard 
-                      key={idx} 
+                      key={card?.id ?? idx} 
                       id={`capture-${card.id}`}
                       disabled={insertingCapture !== null && !isBeingInserted} 
                     >
                       <div style={styles.captureCardWrapper}>
                         <div style={{ 
                           ...styles.comboCard, 
-                          background: cardColor, 
+                          background: getCardBackground(card), 
                           opacity: insertingCapture && !isBeingInserted ? 0.5 : 1,
                           cursor: 'grab'
                         }}>
-                          {card.isSplit ? `${card.splitValues[0]}/${card.splitValues[1]}` : card.value}
+                          {card.isSpecialCard ? (SPECIAL_EFFECT_NAMES[card.effectId] || 'Special') : card.isSplit ? `${card.splitValues[0]}/${card.splitValues[1]}` : card.value}
                         </div>
                         <div style={styles.captureCardActions}>
                           {!insertingCapture && (
@@ -1523,29 +1696,36 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
                   const isAdjacent = selectedCards.length > 0 && 
                     (selectedCards.includes(index - 1) || selectedCards.includes(index + 1))
                   const isValidRingo = ringoMode && getValidRingoCards.has(index)
-                  
-                  const cardColor = card.isSplit 
-                    ? `linear-gradient(to right, ${getCardColor(card.splitValues[0])} 0%, ${getCardColor(card.splitValues[0])} 50%, ${getCardColor(card.splitValues[1])} 50%, ${getCardColor(card.splitValues[1])} 100%)`
-                    : getCardColor(card.value)
+                  const isSpecial = card.isSpecialCard
                   
                   const baseCardSize = isMobile ? { width: 48, height: 72, fontSize: 20 } : {}
                   const CardContent = (
                     <div
-                      onClick={() => !insertingCard && insertingCapture === null && handleCardClick(index)}
+                      onClick={() => {
+                        if (insertingCard || insertingCapture !== null) return
+                        if (ringoMode && isSpecial) return // specials can't form RINGO combos with drawn card
+                        handleCardClick(index)
+                      }}
                       style={{
                         ...styles.card,
                         ...baseCardSize,
-                        background: cardColor,
+                        background: getCardBackground(card),
                         color: 'white',
                         cursor: insertingCard || insertingCapture !== null ? 'default' : 'pointer',
                         ...(isSelected ? styles.selectedCard : {}),
                         ...(isAdjacent && !isSelected ? styles.adjacentCard : {}),
                         ...(ringoMode && !isSelected && !isAdjacent && !isValidRingo ? styles.ringoDimmedCard : {}),
                         ...(ringoMode && isValidRingo && !isSelected ? styles.validRingoCard : {}),
-                        ...(invalidSelectionIndex === index ? styles.invalidCard : {})
+                        ...(invalidSelectionIndex === index ? styles.invalidCard : {}),
+                        ...(isSpecial ? styles.handCardSpecial : {})
                       }}
                     >
-                      {card.isSplit ? (
+                      {isSpecial ? (
+                        <div style={styles.handCardSpecialInner}>
+                          <span style={styles.handCardSpecialBadge}>Special</span>
+                          <span style={styles.handCardSpecialName}>{SPECIAL_EFFECT_NAMES[card.effectId] || 'Special'}</span>
+                        </div>
+                      ) : card.isSplit ? (
                         <div style={styles.splitCardContainer}>
                           <div style={styles.splitCardValue}>{card.splitValues[0]}</div>
                           <div style={styles.splitDivider}>/</div>
@@ -1719,13 +1899,18 @@ export default function GameBoard({ socket, gameState, roomCode, roomPlayers = [
            {activeDragId === 'drawn-card' ? (
              <div style={{
                ...styles.drawnCard,
-               background: drawnCard?.isSplit 
-                 ? `linear-gradient(to right, ${getCardColor(drawnCard.splitValues[0])} 0%, ${getCardColor(drawnCard.splitValues[0])} 50%, ${getCardColor(drawnCard.splitValues[1])} 50%, ${getCardColor(drawnCard.splitValues[1])} 100%)`
-                 : getCardColor(drawnCard?.value),
+               ...(drawnCard?.isSpecialCard ? styles.drawnCardSpecial : {}),
+               background: getDrawnCardBackground(drawnCard),
                color: 'white',
-               opacity: 0.9
+               opacity: 0.95
              }}>
-                {drawnCard?.isSplit ? (
+                {drawnCard?.isSpecialCard ? (
+                  <div style={styles.specialCardInner}>
+                    <span style={styles.specialCardBadge}>Special</span>
+                    <span style={styles.specialCardName}>{getDrawnCardLabel(drawnCard)}</span>
+                    <span style={styles.specialCardDesc}>{getSpecialCardDescription(drawnCard.effectId)}</span>
+                  </div>
+                ) : drawnCard?.isSplit ? (
                   <div style={styles.splitCardContainer}>
                     <div style={styles.splitCardValue}>{drawnCard.splitValues[0]}</div>
                     <div style={styles.splitDivider}>/</div>
@@ -2416,10 +2601,164 @@ const styles = {
     margin: '0 auto 20px',
     boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
     border: '1px solid rgba(0,0,0,0.1)',
-    transition: 'transform 0.2s',
-    ':hover': {
-      transform: 'scale(1.05)'
-    }
+    transition: 'transform 0.2s'
+  },
+  drawnCardSpecial: {
+    width: '140px',
+    minHeight: '120px',
+    height: 'auto',
+    padding: '10px 8px',
+    borderRadius: '14px',
+    border: '2px solid rgba(255,255,255,0.4)',
+    boxShadow: '0 8px 24px rgba(91, 33, 182, 0.35)'
+  },
+  specialCardInner: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    width: '100%'
+  },
+  specialCardBadge: {
+    fontSize: 9,
+    fontWeight: 800,
+    letterSpacing: '0.12em',
+    textTransform: 'uppercase',
+    color: 'rgba(255,255,255,0.9)',
+    background: 'rgba(255,255,255,0.2)',
+    padding: '2px 6px',
+    borderRadius: 4
+  },
+  specialCardName: {
+    fontSize: 13,
+    fontWeight: 800,
+    lineHeight: 1.2,
+    textAlign: 'center'
+  },
+  specialCardDesc: {
+    fontSize: 9,
+    lineHeight: 1.25,
+    textAlign: 'center',
+    color: 'rgba(255,255,255,0.9)'
+  },
+  specialCardHint: {
+    margin: '-8px auto 12px',
+    maxWidth: 260,
+    fontSize: 12,
+    color: '#555',
+    lineHeight: 1.35
+  },
+  specialCardTargetRow: {
+    width: '100%',
+    marginBottom: 4
+  },
+  specialCardTargetLabel: {
+    display: 'block',
+    fontSize: 12,
+    fontWeight: 600,
+    color: '#444',
+    marginBottom: 6
+  },
+  specialCardTargetSelect: {
+    width: '100%',
+    padding: '10px 12px',
+    borderRadius: 10,
+    border: '2px solid #e2e8f0',
+    fontSize: 14,
+    background: '#fff'
+  },
+  specialCardChip: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    color: '#fff'
+  },
+  specialCardChipBadge: {
+    fontSize: 8,
+    fontWeight: 800,
+    letterSpacing: '0.1em',
+    textTransform: 'uppercase',
+    color: 'rgba(255,255,255,0.95)'
+  },
+  specialCardChipName: {
+    fontSize: 11,
+    fontWeight: 700,
+    lineHeight: 1.2
+  },
+  handCardSpecial: {
+    minHeight: 72
+  },
+  handCardSpecialInner: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    padding: '2px 4px'
+  },
+  handCardSpecialBadge: {
+    fontSize: 8,
+    fontWeight: 800,
+    letterSpacing: '0.08em',
+    textTransform: 'uppercase',
+    color: 'rgba(255,255,255,0.95)'
+  },
+  handCardSpecialName: {
+    fontSize: 10,
+    fontWeight: 700,
+    lineHeight: 1.2,
+    textAlign: 'center'
+  },
+  playerCardMiniSpecial: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 2
+  },
+  playerCardMiniSpecialLabel: {
+    fontSize: 8,
+    fontWeight: 700,
+    lineHeight: 1.15,
+    textAlign: 'center',
+    color: '#fff'
+  },
+  specialResultSubtitle: {
+    fontSize: 14,
+    color: '#555',
+    margin: '0 0 16px',
+    lineHeight: 1.45
+  },
+  specialResultSingleCardWrap: {
+    display: 'flex',
+    justifyContent: 'center',
+    margin: '8px 0'
+  },
+  specialResultSingleCard: {
+    width: 72,
+    height: 108,
+    borderRadius: 10
+  },
+  specialResultPeekCardWrap: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: 4
+  },
+  specialResultPeekLabel: {
+    fontSize: 11,
+    fontWeight: 700,
+    color: '#666',
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em'
+  },
+  specialResultMessage: {
+    margin: 0,
+    fontSize: 14,
+    color: '#666'
   },
   drawnCardActions: {
     display: 'flex',
@@ -2527,6 +2866,19 @@ const styles = {
     cursor: 'pointer',
     width: '100%',
     transition: 'all 0.2s'
+  },
+  useSpecialButton: {
+    background: 'linear-gradient(135deg, #7c3aed 0%, #8b5cf6 50%, #a78bfa 100%)',
+    color: 'white',
+    padding: '16px 24px',
+    fontSize: '16px',
+    fontWeight: '800',
+    borderRadius: '14px',
+    border: 'none',
+    cursor: 'pointer',
+    width: '100%',
+    transition: 'transform 0.15s, box-shadow 0.2s',
+    boxShadow: '0 0 20px rgba(124, 58, 237, 0.5), 0 4px 14px rgba(0,0,0,0.2)'
   },
   insertSlot: {
     width: '28px',

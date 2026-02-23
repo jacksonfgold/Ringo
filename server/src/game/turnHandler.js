@@ -241,17 +241,24 @@ export function handleDrawWithTracking(state, playerId) {
     return result
   }
 
-  // Store drawn card in state for RINGO/insert/discard
+  // Special cards: only Use or Discard, no RINGO/insert
+  const isSpecial = result.drawnCard?.isSpecialCard === true
+  const turnPhase = isSpecial
+    ? TurnPhase.PROCESSING_DRAW
+    : (result.ringoPossible ? TurnPhase.RINGO_CHECK : TurnPhase.PROCESSING_DRAW)
+
   const newState = {
     ...result.state,
     drawnCard: result.drawnCard,
     drawnCardPlayer: playerId,
-    turnPhase: result.ringoPossible ? TurnPhase.RINGO_CHECK : TurnPhase.PROCESSING_DRAW
+    turnPhase
   }
 
   return {
     ...result,
-    state: newState
+    state: newState,
+    ringoPossible: isSpecial ? false : result.ringoPossible,
+    ringoInfo: isSpecial ? null : result.ringoInfo
   }
 }
 
@@ -470,6 +477,7 @@ export function handleDiscardDrawnCardWithTracking(state, playerId) {
 
   newState = advanceTurn(newState)
   newState = checkPileClosing(newState)
+  newState = checkWinCondition(newState)
 
   return { success: true, state: newState, discardedCard }
 }
